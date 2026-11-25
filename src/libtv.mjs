@@ -188,7 +188,10 @@ async function searchModels(nodeType, query) {
 
 export async function listModels(force = false) {
   if (!force && Date.now() - modelCache.at < config.MODEL_CACHE_MS && modelCache.image.length) return modelCache
-  const [image, video] = await Promise.all([searchModels('image', 'image'), searchModels('video', 'video')])
+  // 关键：query 必须传空字符串，LibTV 会把非空 query 当作名称/描述过滤。
+  // 之前传 'image'/'video' 只匹配到名字里带这些词的模型（图像 21 / 视频 5），
+  // 漏掉了 wanx3.0、wanxiang-*、kling-*、seedance-*、jimeng-* 等大量模型。
+  const [image, video] = await Promise.all([searchModels('image', ''), searchModels('video', '')])
   modelCache = { at: Date.now(), image, video }
   return modelCache
 }
