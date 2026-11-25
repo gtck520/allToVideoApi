@@ -122,7 +122,7 @@ curl http://127.0.0.1:8787/healthz
 
 | 地址 | 用途 |
 |---|---|
-| <http://127.0.0.1:8787/docs> | 浏览器打开的可视化文档 |
+| <http://127.0.0.1:8787/docs> | 浏览器打开的可视化文档：左侧接口导航，右侧说明 / 参数 / cURL·Node.js·Python 示例，支持搜索与明暗主题 |
 | <http://127.0.0.1:8787/docs.md> | Markdown 文本，适合直接发给 Agent |
 | <http://127.0.0.1:8787/openapi.json> | OpenAPI 3.0 JSON，适合自动生成客户端 |
 
