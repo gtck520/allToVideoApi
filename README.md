@@ -45,6 +45,53 @@ curl -X POST http://127.0.0.1:8787/v1/images/generations \
 
 ---
 
+## 授权页面与 Docker 部署
+
+网关附带一个授权页 `GET /auth`（免鉴权，展示当前授权状态 + 授权入口）。关于授权，有一个 **LibTV 官方硬约束**必须知道：
+
+> LibTV 的 OAuth 动态注册**只接受 loopback 回调**（`127.0.0.1:*` / `localhost:*`）。内网 IP（如 `192.168.x.x`）和公网域名都会被以 `invalid_redirect_uri` 拒绝（2026-11-25 实测）。
+
+### 推荐方案：宿主机授权 + 挂载凭据（Docker）
+
+在**宿主机**完成一次扫码，把凭据文件挂进容器。refresh token 会自动续期，通常一次授权长期有效：
+
+```bash
+# 1. 宿主机扫码授权（一次）
+npm run auth:login
+
+# 2. 启动容器，挂载凭据与配置（都不要打进镜像）
+docker run -d --name libtv-gateway -p 8787:8787 \\
+  -v $(pwd)/data/credentials.json:/app/data/credentials.json:ro \\
+  -v $(pwd)/.env:/app/.env:ro \\
+  libtv-openai-gateway
+
+# 3. 打开授权页确认状态
+#    http://127.0.0.1:8787/auth
+```
+
+配套的 `Dockerfile` 见仓库根目录。凭据、API key、任务记录全部通过 mount 提供，**镜像内不含任何私密数据**。
+
+### 可选方案：页面直接授权
+
+若网关跑在你本机（或 Docker 用 `-p 8787:8787` 映射到宿主机 loopback），可设置：
+
+```bash
+GATEWAY_PUBLIC_URL=http://127.0.0.1:8787
+```
+
+此时 `/auth` 页面会多出一个「跳转到官方授权」按钮：点它 → 微信扫码 → 官方回调 `/auth/callback` → 自动换取并保存凭据 → 页面显示结果。全程不用敲命令。相关路由：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/auth` | 授权页（免鉴权）：状态 + 授权入口 |
+| GET | `/auth/status` | 授权状态 JSON：是否已授权、scope、到期时间、已注册回调 |
+| POST | `/auth/start` | 发起授权，返回官方 authorize URL（需 `GATEWAY_PUBLIC_URL` 为 loopback） |
+| GET | `/auth/callback` | 官方回调入口：换 token → 落盘 → 回显结果页 |
+
+> `/auth/start` 与 `/auth/callback` 有 state + PKCE 保护，且 state 一次性消费；页面本身不展示任何 token。但授权页免鉴权意味着能访问网关的人都可以发起重新授权——**请勿把网关直接暴露到公网**，或在反向代理层限制 `/auth` 路径。
+
+---
+
 ## 接口文档（免鉴权）
 
 | 路径 | 格式 | 用途 |

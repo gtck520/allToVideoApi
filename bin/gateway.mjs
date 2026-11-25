@@ -24,6 +24,8 @@ server.listen(config.PORT, async () => {
   console.error(`  画布 project: ${config.PROJECT_ID}`)
   console.error(`  默认图像模型: ${config.DEFAULT_IMAGE_MODEL} / 默认视频模型: ${config.DEFAULT_VIDEO_MODEL}`)
   console.error(`  并发上限    : ${config.MAX_CONCURRENT_GENERATIONS}`)
+  console.error(`  授权页  : http://127.0.0.1:${config.PORT}/auth （Docker 部署需先配 GATEWAY_PUBLIC_URL）`)
+  console.error(`  接口文档: http://127.0.0.1:${config.PORT}/docs  |  /docs.md  |  /openapi.json`)
   console.error(`  接口:`)
   console.error(`    GET  /healthz`)
   console.error(`    GET  /v1/models`)

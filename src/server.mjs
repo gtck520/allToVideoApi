@@ -16,7 +16,9 @@ import { listModels, resolveModel, getModelContract, getModelContracts, generati
 import { runJob, sizeToRatio, nToCount, getJob, publicView } from './orchestrator.mjs'
 import { findMirrored } from './mirror.mjs'
 import { openapi, markdownDoc, htmlDoc } from './docs.mjs'
-import { initialize, callTool } from './mcp.mjs'
+import { authPageHtml, authResultHtml } from './auth-page.mjs'
+import { authSummary, startWebLogin, completeWebLogin, webAuthAvailable } from './oauth.mjs'
+import { initialize, callTool, resetSession } from './mcp.mjs'
 
 const MAX_BODY = 26 * 1024 * 1024 // 图片上传上限 25MB + 余量
 
@@ -303,6 +305,39 @@ async function handleVideoGet(req, res, id, redirect) {
   sendJson(res, 200, absolutize(req.headers.host, publicView(job)))
 }
 
+// ---------- Web 授权（免鉴权：给人用浏览器打开；有 state+PKCE 保护）----------
+function sendHtml(res, status, html, cache = 'no-store') {
+  const body = Buffer.from(html, 'utf8')
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length, 'cache-control': cache })
+  res.end(body)
+}
+
+async function handleAuthStart(res) {
+  try {
+    const out = await startWebLogin()
+    sendJson(res, 200, { authorize_url: out.authorizeUrl, state: out.state, redirect_uri: out.redirectUri, expires_in_ms: out.expiresInMs })
+  } catch (err) {
+    sendError(res, 400, err.message, err.code || 'auth_start_failed')
+  }
+}
+
+async function handleAuthCallback(req, res, url) {
+  const state = url.searchParams.get('state')
+  const code = url.searchParams.get('code')
+  const error = url.searchParams.get('error')
+  const errorDescription = url.searchParams.get('error_description')
+  try {
+    const summary = await completeWebLogin({ state, code, error, errorDescription })
+    // 凭据已更新：重置 MCP 会话，下次请求用新 token 重握手
+    resetSession()
+    const detail = `授权范围：${summary.scope || '—'}\nToken 到期：${summary.expires_at || '—'}`
+    sendHtml(res, 200, authResultHtml(true, 'LibTV 授权已生效', detail))
+  } catch (err) {
+    console.error(`[auth] 回调处理失败：${err.message.slice(0, 300)}`)
+    sendHtml(res, 200, authResultHtml(false, '授权未完成', err.message))
+  }
+}
+
 async function handleHealth(res) {
   let mcp = 'ok'
   let identity = null
@@ -343,6 +378,22 @@ export function startServer() {
         res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-length': body.length, 'cache-control': 'public, max-age=300' })
         return void res.end(body)
       }
+
+      // Web 授权页 / 回调（免鉴权）
+      if (route === 'GET /auth') return void sendHtml(res, 200, authPageHtml())
+      if (route === 'GET /auth/status') {
+        const s = authSummary()
+        return void sendJson(res, 200, {
+          authorized: s.authorized,
+          scope: s.scope,
+          expires_at: s.expiresAt,
+          has_refresh_token: s.hasRefreshToken,
+          redirect_uris: s.redirectUris,
+          web_auth_available: webAuthAvailable(),
+        })
+      }
+      if (route === 'POST /auth/start') return await handleAuthStart(res)
+      if (route === 'GET /auth/callback') return await handleAuthCallback(req, res, url)
 
       if (!checkAuth(req, url)) {
         sendError(res, 401, '无效的 API key：请以 Authorization: Bearer <GATEWAY_API_KEY> 方式携带', 'invalid_api_key', 'invalid_request_error')

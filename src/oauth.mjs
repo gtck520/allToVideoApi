@@ -32,8 +32,33 @@ export const SCOPES = [
 
 export const CRED_FILE = path.join(DATA_DIR, 'credentials.json')
 const PORT = Number(process.env.LIBTV_OAUTH_PORT || 8765)
-const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`
-const CLIENT_NAME = 'libtv-mcp-probe (stage1 verification)'
+/** CLI 本地回环回调（npm run auth:login 用） */
+const CLI_REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`
+/** Web/网关回调：LibTV 只接受 loopback（127.0.0.1 / localhost），内网IP与公网域名会被
+ *  动态注册以 invalid_redirect_uri 拒绝（实测）。因此 GATEWAY_PUBLIC_URL 必须是浏览器
+ *  可访问的 loopback 地址；Docker 场景用端口映射 -p 8787:8787 时，浏览器访问
+ *  http://127.0.0.1:8787 的回调会经端口映射回到容器。 */
+function isLoopbackUrl(str) {
+  try {
+    const u = new URL(str)
+    return u.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(u.hostname)
+  } catch { return false }
+}
+export function webAuthAvailable() {
+  const base = (process.env.GATEWAY_PUBLIC_URL || '').trim().replace(/\/+$/, '')
+  return isLoopbackUrl(base)
+}
+function webRedirectUri() {
+  const base = (process.env.GATEWAY_PUBLIC_URL || '').trim().replace(/\/+$/, '')
+  if (!base || !isLoopbackUrl(base)) return null // 非 loopback 一律不注册，避免拖累整体注册失败
+  return `${base}/auth/callback`
+}
+/** 所有要注册的回调 URI（去重）：CLI 回环 + 可选 Web 回调 */
+function allRedirectUris() {
+  const web = webRedirectUri()
+  return [...new Set([CLI_REDIRECT_URI, ...(web ? [web] : [])])]
+}
+const CLIENT_NAME = 'libtv-openai-gateway'
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 
 export class AuthRequired extends Error {
@@ -86,14 +111,14 @@ export async function discoverResource() {
   return resourceCache
 }
 
-async function registerClient(meta) {
+async function registerClient(meta, redirectUris) {
   if (!meta.registration_endpoint) throw new Error('授权服务器未提供动态注册端点')
   const res = await fetch(meta.registration_endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({
       client_name: CLIENT_NAME,
-      redirect_uris: [REDIRECT_URI],
+      redirect_uris: redirectUris,
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
@@ -108,7 +133,8 @@ async function registerClient(meta) {
   Object.assign(creds, {
     client_id: body.client_id,
     client_secret: body.client_secret,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUris[0],
+    redirect_uris: redirectUris,
     issuer: meta.issuer,
     service: MCP_URL,
   })
@@ -119,8 +145,12 @@ async function registerClient(meta) {
 export async function ensureClient() {
   const meta = await discover()
   const creds = loadCreds()
-  if (creds.client_id && creds.redirect_uri === REDIRECT_URI && creds.issuer === meta.issuer) return creds
-  return registerClient(meta)
+  const wanted = allRedirectUris()
+  // 旧凭据只有单个 redirect_uri：只要包含 CLI 回环也算有效（Web 需要时再重注册）
+  const registered = creds.redirect_uris || (creds.redirect_uri ? [creds.redirect_uri] : [])
+  const covered = wanted.every((uri) => registered.includes(uri))
+  if (creds.client_id && covered && creds.issuer === meta.issuer) return creds
+  return registerClient(meta, wanted)
 }
 
 const b64url = (input) => Buffer.from(input).toString('base64url')
@@ -202,7 +232,7 @@ export async function login({ onAuthorizeUrl } = {}) {
   const authorizeUrl = new URL(meta.authorization_endpoint)
   authorizeUrl.searchParams.set('response_type', 'code')
   authorizeUrl.searchParams.set('client_id', creds.client_id)
-  authorizeUrl.searchParams.set('redirect_uri', REDIRECT_URI)
+  authorizeUrl.searchParams.set('redirect_uri', CLI_REDIRECT_URI)
   authorizeUrl.searchParams.set('scope', SCOPES.join(' '))
   authorizeUrl.searchParams.set('state', state)
   authorizeUrl.searchParams.set('code_challenge', challenge)
@@ -219,7 +249,7 @@ export async function login({ onAuthorizeUrl } = {}) {
   const form = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: CLI_REDIRECT_URI,
     client_id: creds.client_id,
     code_verifier: verifier,
     resource: resource || MCP_URL,
@@ -275,11 +305,90 @@ export function authSummary() {
   const creds = loadCreds()
   return {
     service: MCP_URL,
-    credentialsPath: CRED_FILE,
     clientId: creds.client_id || null,
     authorized: Boolean(creds.tokens?.access_token),
     scope: creds.tokens?.scope || null,
     expiresAt: creds.tokens?.expires_at ? new Date(creds.tokens.expires_at).toISOString() : null,
     hasRefreshToken: Boolean(creds.tokens?.refresh_token),
+    redirectUris: creds.redirect_uris || (creds.redirect_uri ? [creds.redirect_uri] : []),
   }
+}
+
+// ---------------- Web 授权流程（Docker / 页面触发）----------------
+// 内存中的待授权会话：state -> { verifier, redirectUri, createdAt }。
+// 授权是低频操作；进程重启后 pending 失效，用户在页面重新点一次即可。
+const pendingWebLogins = new Map()
+const WEB_LOGIN_TTL_MS = 10 * 60 * 1000
+
+function prunePending() {
+  const now = Date.now()
+  for (const [state, v] of pendingWebLogins) {
+    if (now - v.createdAt > WEB_LOGIN_TTL_MS) pendingWebLogins.delete(state)
+  }
+}
+
+/** 发起 Web 授权：返回官方 authorize URL + state，凭据由 /auth/callback 落地 */
+export async function startWebLogin() {
+  const web = webRedirectUri()
+  if (!web) {
+    throw new NonRetryableErrorWeb(
+      'Web 授权需要 GATEWAY_PUBLIC_URL 为浏览器可访问的 loopback 地址（如 http://127.0.0.1:8787；LibTV 只接受 127.0.0.1/localhost 回调，拒绝内网 IP 与公网域名）。' +
+      'Docker 部署请改用：在宿主机执行 npm run auth:login 扫码授权，再把 data/credentials.json 挂载进容器（推荐），无需页面授权。',
+    )
+  }
+  const meta = await discover()
+  const creds = await ensureClient() // 确保 Web 回调已注册进 client
+  const { resource } = await discoverResource()
+  const { verifier, challenge } = makePkce()
+  const state = b64url(crypto.randomBytes(16))
+  prunePending()
+  pendingWebLogins.set(state, { verifier, redirectUri: web, createdAt: Date.now() })
+
+  const authorizeUrl = new URL(meta.authorization_endpoint)
+  authorizeUrl.searchParams.set('response_type', 'code')
+  authorizeUrl.searchParams.set('client_id', creds.client_id)
+  authorizeUrl.searchParams.set('redirect_uri', web)
+  authorizeUrl.searchParams.set('scope', SCOPES.join(' '))
+  authorizeUrl.searchParams.set('state', state)
+  authorizeUrl.searchParams.set('code_challenge', challenge)
+  authorizeUrl.searchParams.set('code_challenge_method', 'S256')
+  authorizeUrl.searchParams.set('resource', resource || MCP_URL)
+  return { authorizeUrl: authorizeUrl.toString(), state, redirectUri: web, expiresInMs: WEB_LOGIN_TTL_MS }
+}
+
+class NonRetryableErrorWeb extends Error {
+  constructor(message) { super(message); this.name = 'AuthConfigError'; this.code = 'auth_config_error' }
+}
+
+/** 完成 Web 授权：校验 state → 用 code 换 token → 落盘。返回授权摘要。 */
+export async function completeWebLogin({ state, code, error, errorDescription }) {
+  prunePending()
+  if (!state) throw new Error('回调缺少 state 参数')
+  const pending = pendingWebLogins.get(state)
+  if (!pending) throw new Error('授权会话不存在或已过期，请重新发起授权')
+  pendingWebLogins.delete(state) // 一次性消费，防重放
+  if (error) throw new Error(`授权被拒绝：${error} ${errorDescription || ''}`)
+  if (!code) throw new Error('回调缺少 code 参数')
+
+  const meta = await discover()
+  const creds = loadCreds()
+  const { resource } = await discoverResource()
+  const form = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: pending.redirectUri,
+    client_id: creds.client_id,
+    code_verifier: pending.verifier,
+    resource: resource || MCP_URL,
+  })
+  if (creds.client_secret) form.set('client_secret', creds.client_secret)
+  const res = await fetch(meta.token_endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    body: form,
+  })
+  if (!res.ok) throw new Error(`换取 token 失败：HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`)
+  storeTokens(creds, await res.json())
+  // 授权凭据已更新：让 MCP 会话失效，下次调用会用新 token 重握手
+  return authSummary()
 }

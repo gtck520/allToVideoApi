@@ -1,0 +1,11 @@
+# 凭据与私密数据绝不进入镜像构建上下文
+.env
+.env.*
+!.env.example
+data/
+.workbuddy/
+*.log
+node_modules/
+.git/
+README.md
+*.md

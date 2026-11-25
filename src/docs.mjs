@@ -105,6 +105,18 @@ export const openapi = {
     '/healthz': {
       get: { tags: ['meta'], summary: '探活（免鉴权）', security: [], responses: { 200: { description: '服务状态、MCP 授权状态、并发槽位' } } },
     },
+    '/auth': {
+      get: { tags: ['meta'], summary: 'LibTV 授权页（免鉴权）', security: [], description: '给人用浏览器打开：展示当前授权状态与授权入口。Docker 部署推荐在宿主机执行 npm run auth:login 并挂载 data/credentials.json。', responses: { 200: { description: 'HTML 授权页' } } },
+    },
+    '/auth/status': {
+      get: { tags: ['meta'], summary: '授权状态查询（免鉴权）', security: [], responses: { 200: { description: '{authorized, scope, expires_at, has_refresh_token, redirect_uris, web_auth_available}' } } },
+    },
+    '/auth/start': {
+      post: { tags: ['meta'], summary: '发起 Web 授权（免鉴权，需服务端配置 loopback 回调）', security: [], description: '返回官方 authorize URL；LibTV 只接受 127.0.0.1/localhost 回调，需服务端设置 GATEWAY_PUBLIC_URL 为 loopback 地址。', responses: { 200: { description: '{authorize_url, state, redirect_uri}' }, 400: { description: '未配置可用的 loopback 回调地址' } } },
+    },
+    '/auth/callback': {
+      get: { tags: ['meta'], summary: 'OAuth 回调入口（免鉴权，官方调用）', security: [], responses: { 200: { description: 'HTML 结果页，凭据由服务端自动保存' } } },
+    },
     '/docs': {
       get: { tags: ['meta'], summary: '可视化接口文档（免鉴权）', security: [], responses: { 200: { description: 'HTML 文档页' } } },
     },
@@ -191,7 +203,9 @@ export const markdownDoc = `# LibTV OpenAI 兼容网关 API
 Authorization: Bearer <API_KEY>
 \`\`\`
 
-API_KEY 由服务部署方提供。文档类接口与 \`/healthz\` **无需鉴权**。
+API_KEY 由服务部署方提供。文档类接口（\`/docs\`、\`/docs.md\`、\`/openapi.json\`）、\`/healthz\` 与授权页 \`/auth\` 系列**无需鉴权**。
+
+若返回 401 \`invalid_api_key\`，检查 key 是否与部署方给的一致。若返回 \`AUTH_REQUIRED\`（LibTV 侧未授权），需由部署方在 \`GET /auth\` 授权页完成一次扫码授权（或在宿主机执行 \`npm run auth:login\` 后挂载凭据）——这不是下游 Agent 能自行解决的，应提示部署方处理。
 
 ## 2. 对接流程（建议顺序）
 
