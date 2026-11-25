@@ -282,6 +282,21 @@ docker run -d --name libtv-gateway -p 8787:8787 \
 - 如果确实想在页面里授权，把 `GATEWAY_PUBLIC_URL=http://127.0.0.1:8787` 写进 `.env` 并映射端口；但一般不需要。
 - **不要把网关直接暴露到公网**，`/auth` 是免鉴权入口。
 
+### Jenkins 自动部署（本项目服务器）
+
+仓库根目录的 `Jenkinsfile` 已接入 Jenkins，任务名为 `all-to-video-api-deploy`，从 `main` 分支构建：
+
+- 源码与数据统一放在宿主机 `/www/all-to-videoApi`，容器内挂载为 `/app`；`.env` 与 `data/` 在镜像重建时保留。
+- 构建参数：`HOST_PORT`（默认 `8787`）、`LIBTV_PROJECT_ID`（仅首次初始化 `.env` 时写入）、`FORCE_REBUILD`（强制无缓存构建）。
+- 每次推送到 `main` 后手动触发该任务即可重新部署；流水线会构建镜像、替换容器，并从容器内部检查 `/healthz` 与 `/docs.md`。
+- 对外 API key 在 `/www/all-to-videoApi/.env` 的 `GATEWAY_API_KEY`；首次部署自动生成，不会打印到构建日志。
+- 若授权过期导致锁自动解除，可用 SSH 端口转发后在本地浏览器重新授权：
+
+```bash
+ssh -L 8787:127.0.0.1:8787 <用户名>@<服务器>
+# 浏览器打开 http://127.0.0.1:8787/auth 扫码
+```
+
 ---
 
 ## 八、常用配置
