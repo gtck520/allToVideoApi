@@ -108,13 +108,14 @@ pipeline {
                     set -e
                     sleep 5
                     docker ps --filter "name=^/${CONTAINER}$" --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'
-                    curl -fsS "http://127.0.0.1:${HOST_PORT}/healthz" || {
+                    # Jenkins 容器里的 localhost 不是宿主机；从业务容器内部自检
+                    docker exec "$CONTAINER" wget -qO- http://127.0.0.1:8787/healthz || {
                         echo "healthz failed; container logs:"
                         docker logs --tail 100 "$CONTAINER"
                         exit 1
                     }
-                    curl -fsS "http://127.0.0.1:${HOST_PORT}/docs.md" >/dev/null
-                    echo "Deployed: http://127.0.0.1:${HOST_PORT}/docs"
+                    docker exec "$CONTAINER" wget -qO- http://127.0.0.1:8787/docs.md >/dev/null
+                    echo "Deployed on host port ${HOST_PORT}: /docs  /healthz"
                 '''
             }
         }
