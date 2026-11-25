@@ -97,25 +97,58 @@ export const SITE_CSS = `
 const SITE_JS = `
 (() => {
   const root = document.documentElement;
+
+  // 主题切换（没有主题按钮的页面也要能复制，不能提前 return）
   const btn = document.getElementById('site-theme');
-  if (!btn) return;
-  const key = 'lt-docs-theme';
-  const saved = localStorage.getItem(key);
-  if (saved) root.dataset.theme = saved;
-  const sync = () => { btn.textContent = getComputedStyle(root).colorScheme === 'dark' ? '☀' : '☾' };
-  sync();
-  btn.addEventListener('click', () => {
-    const dark = getComputedStyle(root).colorScheme === 'dark';
-    root.dataset.theme = dark ? 'light' : 'dark';
-    localStorage.setItem(key, root.dataset.theme);
+  if (btn) {
+    const key = 'lt-docs-theme';
+    const saved = localStorage.getItem(key);
+    if (saved) root.dataset.theme = saved;
+    const sync = () => { btn.textContent = getComputedStyle(root).colorScheme === 'dark' ? '☀' : '☾' };
     sync();
-  });
-  document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
+      const dark = getComputedStyle(root).colorScheme === 'dark';
+      root.dataset.theme = dark ? 'light' : 'dark';
+      localStorage.setItem(key, root.dataset.theme);
+      sync();
+    });
+  }
+
+  // 复制：HTTP 局域网地址不是安全上下文，navigator.clipboard 不可用，
+  // 必须回退到 execCommand。暴露给其他页面脚本复用。
+  async function copyText(text) {
+    text = String(text == null ? '' : text);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) { /* 继续走回退 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (_) { return false; }
+  }
+  window.__ltCopyText = copyText;
+
+  // 事件委托：模型卡片由后续脚本动态生成，直接绑定会抓不到按钮
+  document.addEventListener('click', async (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('[data-copy]') : null;
+    if (!b) return;
     const label = b.dataset.label || '复制';
-    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '已复制'; }
-    catch { b.textContent = '复制失败'; }
+    const ok = await copyText(b.dataset.copy);
+    b.textContent = ok ? '已复制' : '复制失败';
     setTimeout(() => { b.textContent = label }, 1500);
-  }));
+  });
 })();
 `
 

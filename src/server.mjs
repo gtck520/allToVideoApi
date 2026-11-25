@@ -51,7 +51,7 @@ async function readBody(req, limit = MAX_BODY) {
 }
 
 /** 极简 multipart/form-data 解析（够用即可：取文件 part 与普通字段） */
-function parseMultipart(body, contentType) {
+export function parseMultipart(body, contentType) {
   const m = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/)
   if (!m) throw new NonRetryableError('multipart 缺少 boundary')
   const boundary = '--' + (m[1] || m[2]).trim()
@@ -219,6 +219,53 @@ function parseMaybeJson(v) {
   return undefined
 }
 
+/** 视频请求统一解析：New API / OpenAI 兼容中转用 multipart/form-data，普通客户端用 JSON。 */
+export function parseVideoRequest(req, bodyBuf) {
+  const contentType = req.headers['content-type'] || ''
+  let fields = {}
+  let image = null // { bytes, fileName } 或 URL / base64 字符串
+  if (contentType.includes('multipart/form-data')) {
+    for (const p of parseMultipart(bodyBuf, contentType)) {
+      if (p.filename !== null && p.data.length > 0) {
+        if (p.name === 'image' || !image) image = { bytes: p.data, fileName: p.filename || 'upload.png' }
+      } else {
+        fields[p.name] = p.data.toString('utf8')
+      }
+    }
+  } else {
+    try { fields = JSON.parse(bodyBuf.toString('utf8') || '{}') } catch { throw new NonRetryableError('请求体不是合法 JSON') }
+  }
+  // multipart 里 image 也可能是文本字段（URL / base64），不自带 filename
+  if (!image && fields.image) image = fields.image
+  return { fields, image }
+}
+
+/** width/height → LibTV ratio 枚举的近似映射（params.ratio 优先级更高）。 */
+export function ratioFromWH(width, height) {
+  const w = Number(width), h = Number(height)
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined
+  const candidates = [[1, 1], [9, 16], [16, 9], [4, 3], [3, 4], [3, 2], [2, 3], [21, 9]]
+  const r = w / h
+  let best, err = Infinity
+  for (const [a, b] of candidates) {
+    const d = Math.abs(a / b - r)
+    if (d < err) { err = d; best = a + ':' + b }
+  }
+  return err <= 0.12 ? best : undefined
+}
+
+/** 视频任务对外视图：对齐 OpenAI Sora 的 object / status / progress，同时保留 result 细节。 */
+function videoView(job, host) {
+  const view = absolutize(host, publicView(job))
+  const statusMap = { queued: 'queued', processing: 'in_progress', succeeded: 'completed', failed: 'failed' }
+  return {
+    object: 'video',
+    ...view,
+    status: statusMap[view.status] || view.status,
+    progress: view.status === 'succeeded' ? 100 : view.status === 'processing' ? 50 : 0,
+  }
+}
+
 async function handleImageGeneration(req, res, bodyBuf) {
   let body
   try { body = JSON.parse(bodyBuf.toString('utf8') || '{}') } catch { throw new NonRetryableError('请求体不是合法 JSON') }
@@ -275,29 +322,36 @@ async function handleImageEdit(req, res, bodyBuf) {
 }
 
 async function handleVideoCreate(req, res, bodyBuf) {
-  let body
-  try { body = JSON.parse(bodyBuf.toString('utf8') || '{}') } catch { throw new NonRetryableError('请求体不是合法 JSON') }
-  const prompt = body.prompt
+  const { fields, image } = parseVideoRequest(req, bodyBuf)
+  const prompt = fields.prompt
   if (!prompt || !String(prompt).trim()) throw new NonRetryableError('prompt 不能为空')
 
-  const model = resolveModel(body.model, 'video')
+  const model = resolveModel(fields.model, 'video')
+  // New API 用 duration（秒），OpenAI Sora 风格用 seconds；两者都接受，params 里的 duration 最终覆盖
+  const duration = fields.duration ?? fields.seconds
   const libtvParams = mergeLibtvParams(
-    { ratio: sizeToRatio(body.size), ...(body.seconds ? { duration: Number(body.seconds) } : {}) },
-    body.params,
+    {
+      ratio: sizeToRatio(fields.size) ?? ratioFromWH(fields.width, fields.height),
+      ...(duration ? { duration: Number(duration) } : {}),
+    },
+    parseMaybeJson(fields.params),
   )
 
-  // 可选参考图：URL 或 base64（图生视频）
+  // 可选参考图：multipart 文件、公网 URL 或 base64（图生视频）
   let referenceNodeId = null
-  if (body.image) {
+  if (image) {
     const { uploadImageToCanvas } = await import('./upload.mjs')
     let bytes, fileName
-    if (/^https?:\/\//.test(body.image)) {
-      const r = await fetch(body.image)
+    if (image.bytes) {
+      bytes = image.bytes
+      fileName = image.fileName || 'upload.png'
+    } else if (/^https?:\/\//.test(String(image))) {
+      const r = await fetch(image)
       if (!r.ok) throw new NonRetryableError(`下载参考图失败：HTTP ${r.status}`)
       bytes = Buffer.from(await r.arrayBuffer())
       fileName = 'reference.png'
     } else {
-      bytes = Buffer.from(String(body.image).replace(/^data:[^;]+;base64,/, ''), 'base64')
+      bytes = Buffer.from(String(image).replace(/^data:[^;]+;base64,/, ''), 'base64')
       fileName = 'upload.png'
     }
     const up = await uploadImageToCanvas(bytes, fileName, 'vidref' + Date.now().toString(36))
@@ -309,7 +363,7 @@ async function handleVideoCreate(req, res, bodyBuf) {
     sendError(res, 500, job.error.message, job.error.code, 'api_error')
     return
   }
-  sendJson(res, job.status === 'succeeded' ? 200 : 202, absolutize(req.headers.host, publicView(job)))
+  sendJson(res, job.status === 'succeeded' ? 200 : 202, videoView(job, req.headers.host))
 }
 
 async function handleVideoGet(req, res, id, redirect) {
@@ -326,7 +380,7 @@ async function handleVideoGet(req, res, id, redirect) {
     }
     return
   }
-  sendJson(res, 200, absolutize(req.headers.host, publicView(job)))
+  sendJson(res, 200, videoView(job, req.headers.host))
 }
 
 // ---------- Web 授权（免鉴权：给人用浏览器打开；有 state+PKCE 保护）----------

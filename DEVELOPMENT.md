@@ -88,13 +88,15 @@ GET  /v1/models                        动态模型列表，?detail=full 附带�
 GET  /v1/models/{id}                   单模型实时参数契约
 POST /v1/images/generations            文生图，同步长轮询
 POST /v1/images/edits                  图像编辑，multipart 或 JSON(base64/URL)
-POST /v1/videos                        视频任务，异步
+POST /v1/videos                        视频任务，异步；JSON 或 multipart（New API 兼容）
 GET  /v1/videos/{id}                   任务查询
 GET  /v1/videos/{id}/content           302 跳转结果
 GET  /files/{jobId}[/{n}]              镜像文件（Bearer 或 ?key=）
 ```
 
 统一错误格式：`{"error":{"message","type","code"}}`。
+
+视频接口的请求体同时支持 JSON 与 `multipart/form-data`（后者供 New API 等 OpenAI 兼容中转使用）。`duration`/`seconds` → LibTV `duration`，`width`×`height` → 就近 ratio，`params` 透传优先级最高。对外任务状态映射为 OpenAI Sora 风格：内部 `queued/processing/succeeded/failed` → 对外 `queued/in_progress/completed/failed`，并附 `object:'video'` 与 `progress`（0/50/100）。
 
 ---
 

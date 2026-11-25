@@ -77,13 +77,22 @@ export const openapi = {
       VideoRequest: {
         type: 'object',
         required: ['prompt'],
+        description: '同时接受 application/json 与 multipart/form-data（后者供 New API 等 OpenAI 兼容中转使用）',
         properties: {
           model: { type: 'string', description: '模型 id，省略则用服务端默认视频模型' },
           prompt: { type: 'string', description: '生成提示词（必填）' },
-          image: { type: 'string', description: '可选参考图：公网 URL 或 base64/dataURL（图生视频）' },
+          image: { type: 'string', format: 'binary', description: '可选参考图：multipart 文件 / 公网 URL / base64/dataURL（图生视频）' },
           size: { type: 'string', description: 'OpenAI 风格尺寸，映射为画幅 ratio' },
-          seconds: { type: 'number', description: '时长（秒），映射为 LibTV duration，以模型契约为准', example: 5 },
-          params: { type: 'object', description: 'LibTV 原生参数透传（优先级高于 size/seconds）', example: { duration: 5, ratio: '16:9' } },
+          width: { type: 'integer', description: 'New API 风格宽度，与 height 一起就近映射为 ratio' },
+          height: { type: 'integer', description: 'New API 风格高度，与 width 一起就近映射为 ratio' },
+          duration: { type: 'number', description: 'New API 风格时长（秒），与 seconds 等价', example: 5 },
+          seconds: { type: 'number', description: 'OpenAI Sora 风格时长（秒），映射为 LibTV duration', example: 5 },
+          seed: { type: 'integer', description: 'New API 可选字段；是否生效以模型契约为准' },
+          fps: { type: 'integer', description: 'New API 可选字段；是否生效以模型契约为准' },
+          response_format: { type: 'string', description: '兼容字段；结果始终以 url 形式返回' },
+          user: { type: 'string', description: '兼容字段，不参与生成' },
+          metadata: { type: 'object', description: '兼容字段，不参与生成' },
+          params: { type: 'object', description: 'LibTV 原生参数透传（优先级最高）', example: { duration: 5, ratio: '16:9' } },
         },
       },
       VideoJob: {
@@ -91,10 +100,11 @@ export const openapi = {
         properties: {
           id: { type: 'string', description: '任务 id，用于 GET /v1/videos/{id}' },
           object: { type: 'string', example: 'video' },
-          status: { type: 'string', enum: ['queued', 'processing', 'succeeded', 'failed'], description: '任务状态' },
+          status: { type: 'string', enum: ['queued', 'in_progress', 'completed', 'failed'], description: 'OpenAI Sora 风格任务状态' },
+          progress: { type: 'integer', description: '进度 0 / 50 / 100', example: 0 },
           model: { type: 'string' },
-          created_at: { type: 'string', format: 'date-time' },
-          result: { type: 'object', description: 'succeeded 时含 url / width / height / node_key' },
+          created_at: { type: 'integer', format: 'unix-time', description: 'Unix 时间戳（秒）' },
+          result: { type: 'object', description: 'completed 时含 url / width / height / node_key' },
           error: { type: 'object', description: 'failed 时含 message / code' },
         },
       },
@@ -164,15 +174,16 @@ export const openapi = {
     '/v1/videos': {
       post: {
         tags: ['videos'], summary: '视频生成（异步任务，Sora 风格）',
-        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VideoRequest' } } } },
-        responses: { 202: { description: '任务已接受，返回 VideoJob（status=queued/processing）', content: { 'application/json': { schema: { $ref: '#/components/schemas/VideoJob' } } } }, 500: { description: '提交失败' } },
+        description: '同时支持 application/json 与 multipart/form-data（New API 等 OpenAI 兼容中转使用 multipart）。',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/VideoRequest' } }, 'multipart/form-data': { schema: { $ref: '#/components/schemas/VideoRequest' } } } },
+        responses: { 202: { description: '任务已接受，返回 VideoJob（status=queued/in_progress）', content: { 'application/json': { schema: { $ref: '#/components/schemas/VideoJob' } } } }, 500: { description: '提交失败' } },
       },
     },
     '/v1/videos/{id}': {
       get: {
         tags: ['videos'], summary: '查询视频任务',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        responses: { 200: { description: 'VideoJob，succeeded 时 result.url 为结果地址' }, 404: { description: '任务不存在' } },
+        responses: { 200: { description: 'VideoJob，completed 时 result.url 为结果地址' }, 404: { description: '任务不存在' } },
       },
     },
     '/v1/videos/{id}/content': {
@@ -251,15 +262,22 @@ curl -X POST http://<HOST>/v1/images/edits \\
 JSON 方式：\`image\` 为公网 URL / base64 / dataURL。响应结构同文生图。
 
 ### POST /v1/videos —— 视频生成（异步）
+接受 JSON 或 multipart/form-data。New API 等 OpenAI 兼容中转使用后者，字段 \`duration\` / \`width\` / \`height\` 会被映射；\`params\` 可传 JSON 字符串。
 \`\`\`bash
 curl -X POST http://<HOST>/v1/videos \\
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"model":"motion-3.1-lite","prompt":"ocean waves at sunset","params":{"duration":5}}'
+
+# New API 风格（multipart）
+curl -X POST http://<HOST>/v1/videos \\
+  -H "Authorization: Bearer $API_KEY" \\
+  -F "model=motion-3.1-lite" -F "prompt=ocean waves at sunset" -F "duration=5"
 \`\`\`
-返回 \`202\` + \`{id, status, model, created_at, result?}\`（Sora 风格）。
+返回 \`202\` + \`{id, object:"video", status, progress, model, created_at, result?}\`（Sora 风格）。
 
 ### GET /v1/videos/{id} —— 查询视频任务
-轮询到 \`status=succeeded\` 时 \`result.url\` 即结果地址；\`failed\` 时看 \`error\`。
+轮询到 \`status=completed\` 时 \`result.url\` 即结果地址；\`failed\` 时看 \`error\`。
+状态为 OpenAI Sora 风格：\`queued\` / \`in_progress\` / \`completed\` / \`failed\`。
 
 ### GET /v1/videos/{id}/content —— 302 跳转结果
 未完成返回 \`409\`，不存在返回 \`404\`。
@@ -381,8 +399,8 @@ const RESPONSES = {
   'get /v1/models/{id}': { id: 'lib-image-2.5-f', object: 'model', modality: 'image', input_contract: { parameterSchemas: { generation: { properties: { ratio: { enum: ['1:1', '9:16', '16:9'] }, resolution: { enum: ['1K', '2K'] }, count: { enum: [1, 2, 4] } } } } } },
   'post /v1/images/generations': { created: 1764000000, data: [{ url: 'https://.../image.png' }], libtv: { job_id: '...', model: 'lib-image-2.5-f', node_key: '...' } },
   'post /v1/images/edits': { created: 1764000000, data: [{ url: 'https://.../edited.png' }], libtv: { job_id: '...', model: 'lib-image-2.5-f', node_key: '...', reference_node: '...' } },
-  'post /v1/videos': { id: 'job-...', object: 'video', status: 'queued', model: 'motion-3.1-lite', created_at: '2026-11-25T12:00:00.000Z' },
-  'get /v1/videos/{id}': { id: 'job-...', object: 'video', status: 'succeeded', model: 'motion-3.1-lite', created_at: '2026-11-25T12:00:00.000Z', result: { url: 'https://.../video.mp4', width: 1280, height: 720, node_key: '...' } },
+  'post /v1/videos': { id: 'job-...', object: 'video', status: 'queued', progress: 0, model: 'motion-3.1-lite', created_at: 1764000000 },
+  'get /v1/videos/{id}': { id: 'job-...', object: 'video', status: 'completed', progress: 100, model: 'motion-3.1-lite', created_at: 1764000000, result: { url: 'https://.../video.mp4', width: 1280, height: 720, node_key: '...' } },
   'get /v1/videos/{id}/content': null,
   'get /files/{jobId}/{index}': null,
 }
@@ -395,7 +413,7 @@ const ENDPOINT_NOTES = {
   'post /v1/images/generations': ['同步长轮询：一次请求等到生成完成，通常耗时数十秒到数分钟。', 'size / n 是 OpenAI 便利字段；需要精确控制时用 params 透传，优先级更高。'],
   'post /v1/images/edits': ['支持 multipart/form-data（推荐）与 application/json（image 为 URL / base64 / dataURL）。'],
   'post /v1/videos': ['异步任务：立即返回 202 和任务 id，再用 GET /v1/videos/{id} 轮询。', 'Timeout 后任务仍保留，可用任务 id 继续查询。'],
-  'get /v1/videos/{id}': ['status=succeeded 时 result.url 为结果地址；failed 时查看 error。'],
+  'get /v1/videos/{id}': ['status=completed 时 result.url 为结果地址；failed 时查看 error。', '状态为 OpenAI Sora 风格：queued / in_progress / completed / failed。'],
   'get /v1/videos/{id}/content': ['浏览器可直接打开；未完成返回 409，不存在返回 404。'],
   'get /files/{jobId}/{index}': ['鉴权可用 Bearer 头或 ?key=<API_KEY>，后者便于 <img> / <video> 标签引用。'],
 }
@@ -733,12 +751,34 @@ const DOC_JS = `
       tabs.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== tab.dataset.lang));
     }));
   });
+  async function copyText(text) {
+    text = String(text == null ? '' : text);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) { /* 继续走回退 */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (_) { return false; }
+  }
   document.querySelectorAll('.copy-btn').forEach(btn => btn.addEventListener('click', async () => {
     const box = btn.closest('.code-tabs, .code-block');
     const panel = box && box.querySelector('.tab-panel:not(.hidden) pre, .code-block pre');
     if (!panel) return;
-    try { await navigator.clipboard.writeText(panel.textContent); btn.textContent = '已复制'; }
-    catch { btn.textContent = '复制失败'; }
+    const ok = await copyText(panel.textContent);
+    btn.textContent = ok ? '已复制' : '复制失败';
     setTimeout(() => { btn.textContent = '复制'; }, 1500);
   }));
 

@@ -261,6 +261,35 @@ console.log(result.data[0].url)
 
 错误统一为 `{"error":{"message","type","code"}}` 格式。
 
+### 7. 接入 New API
+
+本网关本身就是 OpenAI 兼容上游，可以直接作为 New API 的渠道使用，不需要再套一层转换。
+
+**渠道配置**：
+
+| 项 | 填什么 |
+|---|---|
+| 渠道类型 | `OpenAI`（OpenAI Compatible） |
+| 代理地址 / Base URL | `http://<服务器IP>:8787` —— **只填到根路径**，不要带 `/v1`，New API 会自己拼 |
+| 密钥 | `/www/all-to-videoApi/.env` 里的 `GATEWAY_API_KEY` |
+| 模型列表 | 拉取后勾选需要的模型；图像模型和视频模型分开勾选，模型名与 `/v1/models` 返回的 id 保持一致 |
+
+**图像生成**：走 `/v1/images/generations`，标准字段 `model` / `prompt` / `n` / `size` 均可直接用；`n` 映射为 LibTV 的 `count`，`size` 就近映射为画幅。更精细的控制（清晰度、比例、数量枚举）放 `params` 透传。
+
+**视频生成**：走 `/v1/videos`，同时接受 JSON 和 `multipart/form-data`。New API 发过来的 `duration`、`width`、`height` 会被映射为 LibTV 参数，`image` 字段支持文件或 URL/base64。任务返回 OpenAI Sora 风格：
+
+```json
+{ "id": "vid-...", "object": "video", "status": "queued", "progress": 0, "model": "...", "created_at": 1764000000 }
+```
+
+轮询 `GET /v1/videos/{id}`，`status=completed` 且 `progress=100` 时从 `result.url` 取结果。状态枚举为 `queued` / `in_progress` / `completed` / `failed`。
+
+**几个注意点**：
+
+- 结果默认返回 **LibTV 原始公网 URL**，网关不做转存。若下游必须拿到本网关可下载的链接，需开启 `MIRROR_RESULTS=true`，并通过 `/files/{jobId}` 读取（该路径支持 `?key=<API_KEY>`）。
+- 若授权过期或 refresh 连续失败，网关会返回 `AUTH_REQUIRED` 并自动解锁 `/auth`，需要部署方重新扫码，New API 侧无法自行恢复。
+- 如果 New API 版本较旧、没有视频渠道支持，图像部分仍可正常接入；视频需升级到支持 `/v1/videos` 的版本。
+
 ---
 
 ## 七、Docker 部署
