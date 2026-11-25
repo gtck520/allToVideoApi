@@ -6,43 +6,32 @@
 //   B. 页面授权（仅当 GATEWAY_PUBLIC_URL 是 loopback 时可用）：点按钮跳官方授权，回调自动落凭据。
 //      LibTV 只接受 127.0.0.1 / localhost 回调，拒绝内网 IP 与公网域名（实测）。
 
-function shell(title, body, script = '') {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
-<style>
-  :root{--bg:#0d1117;--fg:#c9d1d9;--muted:#8b949e;--accent:#58a6ff;--border:#30363d;--card:#161b22;--ok:#3fb950;--err:#f85149;--warn:#d29922}
-  @media (prefers-color-scheme: light){:root{--bg:#fff;--fg:#24292f;--muted:#57606a;--accent:#0969da;--border:#d0d7de;--card:#f6f8fa;--ok:#1a7f37;--err:#cf222e;--warn:#9a6700}}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-  .wrap{max-width:760px;margin:0 auto;padding:40px 22px 80px}
-  h1{font-size:24px;margin:0 0 6px}
-  .sub{color:var(--muted);margin-bottom:28px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:22px 24px;margin-bottom:18px}
-  .row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px}
-  .row:last-child{border-bottom:0}
-  .k{color:var(--muted);white-space:nowrap}
-  .v{font-family:ui-monospace,Consolas,monospace;word-break:break-all;text-align:right}
-  .badge{display:inline-block;border-radius:20px;padding:2px 12px;font-size:13px;font-weight:600}
-  .badge.ok{background:rgba(63,185,80,.15);color:var(--ok)}
-  .badge.no{background:rgba(248,81,73,.15);color:var(--err)}
-  button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-size:15px;font-weight:600;cursor:pointer}
-  button:hover{filter:brightness(1.1)}
-  button:disabled{opacity:.55;cursor:not-allowed}
-  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
-  .hint{color:var(--muted);font-size:13px;margin-top:12px}
-  .err{color:var(--err);background:rgba(248,81,73,.1);border:1px solid var(--err);border-radius:7px;padding:10px 14px;margin-top:14px;font-size:14px;display:none}
-  .big{font-size:18px;font-weight:600;margin-bottom:10px}
-  a{color:var(--accent)}
-  code,pre{font-family:ui-monospace,Consolas,monospace}
-  pre{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:12px 14px;overflow:auto;font-size:13px;margin:10px 0 0}
-</style>
-</head>
-<body><div class="wrap">${body}</div><script>${script}</script></body>
-</html>`
+import { siteHtml } from './site.mjs'
+
+const AUTH_CSS = `
+  .auth-page{max-width:820px}
+  .auth-page h1{font-size:24px}
+  .auth-page .sub{color:var(--muted);margin:0 0 26px}
+  .auth-page .card{padding:20px 22px;margin-bottom:16px}
+  .auth-page .row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px}
+  .auth-page .row:last-child{border-bottom:0}
+  .auth-page .k{color:var(--muted);white-space:nowrap}
+  .auth-page .v{font-family:ui-monospace,Consolas,monospace;word-break:break-all;text-align:right}
+  .auth-page .badge{display:inline-block;border-radius:20px;padding:2px 12px;font-size:13px;font-weight:600}
+  .auth-page .badge.ok{background:rgba(86,211,100,.15);color:var(--ok)}
+  .auth-page .badge.no{background:rgba(255,123,114,.15);color:var(--err)}
+  .auth-page button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:11px 22px;font-size:15px;font-weight:600;cursor:pointer}
+  .auth-page button:hover{filter:brightness(1.1)}
+  .auth-page button:disabled{opacity:.55;cursor:not-allowed}
+  .auth-page button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .auth-page .hint{margin-top:12px}
+  .auth-page .err{color:var(--err);background:rgba(255,123,114,.1);border:1px solid var(--err);border-radius:7px;padding:10px 14px;margin-top:14px;font-size:14px;display:none}
+  .auth-page .big{font-size:18px;font-weight:600;margin-bottom:10px}
+  .auth-page pre{background:var(--soft);margin-top:10px}
+`
+
+function shell(title, body, script = '', active = 'auth') {
+  return siteHtml({ title, active, extraCss: AUTH_CSS, body: `<div class="auth-page container">${body}</div>`, script })
 }
 
 /** 授权首页：展示状态 + 两种授权方式 */

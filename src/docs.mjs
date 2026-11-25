@@ -102,6 +102,12 @@ export const openapi = {
   },
   security: [{ BearerAuth: [] }],
   paths: {
+    '/': {
+      get: { tags: ['meta'], summary: '站点首页（免鉴权）', security: [], description: '浏览器打开：模型广场 / API 文档 / 授权的顶部导航与最短对接路径。', responses: { 200: { description: 'HTML 首页' } } },
+    },
+    '/models': {
+      get: { tags: ['meta'], summary: '模型广场（免鉴权）', security: [], description: '浏览器打开：实时模型列表与参数契约，支持搜索、按模态筛选、查看原始契约、复制模型 ID。', responses: { 200: { description: 'HTML 模型广场' } } },
+    },
     '/healthz': {
       get: { tags: ['meta'], summary: '探活（免鉴权）', security: [], responses: { 200: { description: '服务状态、MCP 授权状态、并发槽位' } } },
     },
@@ -638,6 +644,13 @@ const DOC_CSS = `
   .crumb b{color:var(--fg)}
   .topbar a,.topbar button{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:5px 10px;background:var(--card);color:var(--fg);cursor:pointer}
   .topbar a:hover,.topbar button:hover{border-color:var(--accent);color:var(--accent)}
+  .top-brand{display:flex;align-items:center;gap:8px;color:var(--fg);font-size:13px;white-space:nowrap}
+  .top-logo{width:27px;height:27px;border-radius:8px;background:linear-gradient(135deg,#4f8cff,#9a67ff);color:#fff;display:grid;place-items:center;font-weight:800;font-size:11px}
+  .top-nav{display:flex;align-items:center;gap:2px;flex:1;min-width:0;overflow-x:auto}
+  .top-nav a{border-color:transparent;background:transparent;color:var(--muted);font-size:13px}
+  .top-nav a:hover{background:var(--card);color:var(--fg)}
+  .top-nav a.active{background:var(--card);color:var(--accent);font-weight:600}
+  .top-actions{display:flex;align-items:center;gap:7px}
   main{max-width:1080px;margin:0 auto;padding:34px 36px 100px}
   .section{scroll-margin-top:76px;padding-bottom:34px;margin-bottom:34px;border-bottom:1px solid var(--border)}
   .section:last-child{border-bottom:none}
@@ -692,7 +705,9 @@ const DOC_CSS = `
     .sidebar{position:fixed;z-index:20;left:0;top:0;width:min(86vw,300px);height:100vh;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow)}
     .sidebar.open{transform:none}
     .menu-btn{display:block}
-    .topbar{padding:0 16px}
+    .topbar{padding:0 14px;gap:10px}
+    .top-brand b{display:none}
+    .top-actions a{display:none}
     main{padding:24px 18px 80px}
     h1{font-size:23px}
   }
@@ -740,12 +755,10 @@ const DOC_JS = `
 
   const links = [...document.querySelectorAll('.nav-item')];
   const sections = links.map(a => document.getElementById(a.dataset.target)).filter(Boolean);
-  const crumb = document.getElementById('crumb-current');
   const setActive = id => {
     const link = links.find(a => a.dataset.target === id);
     if (!link) return;
     links.forEach(a => a.classList.toggle('active', a === link));
-    crumb.textContent = link.querySelector('.nav-text').textContent;
   };
   const observer = new IntersectionObserver(entries => {
     const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
@@ -780,10 +793,15 @@ export function htmlDoc() {
   <div class="main">
     <header class="topbar">
       <button type="button" class="menu-btn" id="menu-btn">☰</button>
-      <div class="crumb">API 参考 / <b id="crumb-current">概览</b></div>
-      <button type="button" id="theme-btn" title="切换主题">☾</button>
-      <a href="/openapi.json">OpenAPI</a>
-      <a href="/docs.md">Markdown</a>
+      <a class="top-brand" href="/"><span class="top-logo">LT</span><b>LibTV API</b></a>
+      <nav class="top-nav">
+        <a href="/">首页</a><a href="/models">模型广场</a><a href="/docs" class="active">API 文档</a><a href="/auth">授权</a>
+      </nav>
+      <div class="top-actions">
+        <button type="button" id="theme-btn" title="切换主题">☾</button>
+        <a href="/openapi.json">OpenAPI</a>
+        <a href="/docs.md">Markdown</a>
+      </div>
     </header>
     <main>
       ${guideSections()}

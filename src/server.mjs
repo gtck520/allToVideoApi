@@ -16,6 +16,8 @@ import { listModels, resolveModel, getModelContract, getModelContracts, generati
 import { runJob, sizeToRatio, nToCount, getJob, publicView } from './orchestrator.mjs'
 import { findMirrored } from './mirror.mjs'
 import { openapi, markdownDoc, htmlDoc } from './docs.mjs'
+import { homeHtml } from './home-page.mjs'
+import { modelsHtml } from './models-page.mjs'
 import { authPageHtml, authResultHtml, authLockedHtml } from './auth-page.mjs'
 import { authSummary, startWebLogin, completeWebLogin, webAuthAvailable, hasPendingWebLogin } from './oauth.mjs'
 import { isAuthLocked, authLockInfo } from './auth-lock.mjs'
@@ -168,6 +170,27 @@ async function handleModels(res, url) {
     for (const m of data) m.input_contract = contracts[m.id] ?? null
   }
   sendJson(res, 200, { object: 'list', data })
+}
+
+/** 模型广场页面：读取实时模型 + 参数契约；失败时给出可操作的授权提示，不暴露原始错误。 */
+async function handleModelsPage(res) {
+  try {
+    const { image, video } = await listModels()
+    const toCard = (m, modality) => ({
+      id: m.modelId ?? m.modelKey,
+      modality,
+      display_name: m.displayName ?? m.modelName,
+      estimated_time: m.estimatedTime,
+      contract: null,
+    })
+    const models = [...image.map((m) => toCard(m, 'image')), ...video.map((m) => toCard(m, 'video'))]
+    const contracts = await getModelContracts(models.map((m) => m.id))
+    for (const m of models) m.contract = contracts[m.id] ?? null
+    return void sendHtml(res, 200, modelsHtml({ models, generatedAt: new Date().toISOString() }))
+  } catch (err) {
+    console.error('[models-page]', err.code || String(err.message || err).slice(0, 160))
+    return void sendHtml(res, 200, modelsHtml({ models: [], error: '模型数据暂时不可用，请检查 LibTV 授权', generatedAt: new Date().toISOString() }))
+  }
 }
 
 async function handleModelDetail(res, id) {
@@ -366,7 +389,9 @@ export function startServer() {
     const route = `${req.method} ${url.pathname}`
     const started = Date.now()
     try {
-      // 免鉴权：探活 + 接口文档（Agent 可直接读取对接）
+      // 免鉴权：首页 / 模型广场 / 探活 / 接口文档（Agent 可直接读取对接）
+      if (route === 'GET /') return void sendHtml(res, 200, homeHtml(), 'public, max-age=300')
+      if (route === 'GET /models') return await handleModelsPage(res)
       if (route === 'GET /healthz') return await handleHealth(res)
       if (route === 'GET /docs') {
         const body = Buffer.from(htmlDoc(), 'utf8')

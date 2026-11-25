@@ -69,6 +69,8 @@ CLI：
 免鉴权（在 `server.mjs` 的 API key 检查之前）：
 
 ```text
+GET  /                    首页（入口导航 + 最短对接路径）
+GET  /models              模型广场（实时模型 + 参数契约，前端筛选/复制 ID）
 GET  /healthz             探活（含 MCP 状态、身份、并发槽位）
 GET  /docs                HTML 文档
 GET  /docs.md             Markdown 文档
