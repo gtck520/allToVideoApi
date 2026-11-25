@@ -1,6 +1,6 @@
 {
   "name": "libtv-openai-gateway",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "LibTV MCP → OpenAI 兼容图像/视频生成 API 网关（单用户自用）",

@@ -106,16 +106,16 @@ export const openapi = {
       get: { tags: ['meta'], summary: '探活（免鉴权）', security: [], responses: { 200: { description: '服务状态、MCP 授权状态、并发槽位' } } },
     },
     '/auth': {
-      get: { tags: ['meta'], summary: 'LibTV 授权页（免鉴权）', security: [], description: '给人用浏览器打开：展示当前授权状态与授权入口。Docker 部署推荐在宿主机执行 npm run auth:login 并挂载 data/credentials.json。', responses: { 200: { description: 'HTML 授权页' } } },
+      get: { tags: ['meta'], summary: 'LibTV 授权页（免鉴权；已授权后锁定）', security: [], description: '给人用浏览器打开：展示当前授权状态与授权入口。首次未授权时可发起授权；授权成功后服务端生成 data/LibTV.lock，本页改为展示锁定状态，不再提供授权按钮。Docker 部署推荐在宿主机执行 npm run auth:login 并挂载 data/credentials.json 与 data/LibTV.lock。', responses: { 200: { description: 'HTML 授权页或授权锁定页' } } },
     },
     '/auth/status': {
-      get: { tags: ['meta'], summary: '授权状态查询（免鉴权）', security: [], responses: { 200: { description: '{authorized, scope, expires_at, has_refresh_token, redirect_uris, web_auth_available}' } } },
+      get: { tags: ['meta'], summary: '授权状态查询（免鉴权）', security: [], responses: { 200: { description: '{authorized, locked, lock:{channel,via,authorized_at,refresh_failures,max_refresh_failures,...}, scope, expires_at, has_refresh_token, redirect_uris, web_auth_available}' } } },
     },
     '/auth/start': {
-      post: { tags: ['meta'], summary: '发起 Web 授权（免鉴权，需服务端配置 loopback 回调）', security: [], description: '返回官方 authorize URL；LibTV 只接受 127.0.0.1/localhost 回调，需服务端设置 GATEWAY_PUBLIC_URL 为 loopback 地址。', responses: { 200: { description: '{authorize_url, state, redirect_uri}' }, 400: { description: '未配置可用的 loopback 回调地址' } } },
+      post: { tags: ['meta'], summary: '发起 Web 授权（免鉴权，需服务端配置 loopback 回调）', security: [], description: '返回官方 authorize URL；LibTV 只接受 127.0.0.1/localhost 回调，需服务端设置 GATEWAY_PUBLIC_URL 为 loopback 地址。授权锁生效后禁止调用。', responses: { 200: { description: '{authorize_url, state, redirect_uri}' }, 400: { description: '未配置可用的 loopback 回调地址' }, 409: { description: 'auth_locked：已授权且授权锁生效' } } },
     },
     '/auth/callback': {
-      get: { tags: ['meta'], summary: 'OAuth 回调入口（免鉴权，官方调用）', security: [], responses: { 200: { description: 'HTML 结果页，凭据由服务端自动保存' } } },
+      get: { tags: ['meta'], summary: 'OAuth 回调入口（免鉴权，官方调用）', security: [], description: '授权锁生效后仅放行锁生成前已发起的在途授权（state 一次性消费）；其他回调返回 409 锁定页。', responses: { 200: { description: 'HTML 结果页，凭据由服务端自动保存' }, 409: { description: '授权锁已生效' } } },
     },
     '/docs': {
       get: { tags: ['meta'], summary: '可视化接口文档（免鉴权）', security: [], responses: { 200: { description: 'HTML 文档页' } } },
@@ -205,7 +205,9 @@ Authorization: Bearer <API_KEY>
 
 API_KEY 由服务部署方提供。文档类接口（\`/docs\`、\`/docs.md\`、\`/openapi.json\`）、\`/healthz\` 与授权页 \`/auth\` 系列**无需鉴权**。
 
-若返回 401 \`invalid_api_key\`，检查 key 是否与部署方给的一致。若返回 \`AUTH_REQUIRED\`（LibTV 侧未授权），需由部署方在 \`GET /auth\` 授权页完成一次扫码授权（或在宿主机执行 \`npm run auth:login\` 后挂载凭据）——这不是下游 Agent 能自行解决的，应提示部署方处理。
+授权页有本地锁保护：首次未授权时可访问 \`/auth\`；授权成功后服务端生成 \`data/LibTV.lock\`，随后 \`/auth\` 只展示锁定状态、\`POST /auth/start\` 返回 409 \`auth_locked\`，防止重复授权覆盖当前账号。若 token 过期且无法续期，或 refresh 连续失败达到阈值（默认 3 次，\`AUTH_REFRESH_MAX_FAILURES\` 可调），网关会自动删除锁并清除凭据，届时 \`/auth\` 重新开放。
+
+若返回 401 \`invalid_api_key\`，检查 key 是否与部署方给的一致。若返回 \`AUTH_REQUIRED\`（LibTV 侧未授权），请先看 \`GET /auth/status\` 的 \`locked\` 字段：为 \`false\` 时由部署方在 \`GET /auth\` 授权页完成一次扫码授权（或在宿主机执行 \`npm run auth:login\` 后挂载凭据与锁文件）；为 \`true\` 但接口仍报未授权，说明凭据异常，需在宿主机执行 \`npm run auth:logout\` 后再授权。这不是下游 Agent 能自行解决的，应提示部署方处理。
 
 ## 2. 对接流程（建议顺序）
 

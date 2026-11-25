@@ -1,5 +1,5 @@
 # LibTV OpenAI 兼容网关 Docker 镜像
-# 镜像内不含任何凭据；凭据通过 volume 挂载（见 README「授权页面与 Docker 部署」）
+# 镜像内不含任何凭据；凭据通过 volume 挂载（见 README「Docker 部署」）
 FROM node:22-alpine
 
 WORKDIR /app

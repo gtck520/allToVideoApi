@@ -61,9 +61,9 @@ export function authPageHtml() {
      <div class="card" id="hostCard" style="display:none">
        <div class="big">方式一 · 宿主机授权（Docker 推荐）</div>
        <div class="hint">LibTV 官方只接受 127.0.0.1 / localhost 回调，不接受内网 IP 或公网域名。因此在 Docker 中部署时，请在<b>宿主机</b>完成扫码，再把凭据文件挂载进容器：</div>
-       <pre>1. 宿主机执行：  npm run auth:login   （微信扫码）
-2. 确认凭据：    data/credentials.json
-3. Docker 挂载： -v $(pwd)/data/credentials.json:/app/data/credentials.json:ro</pre>
+       <pre>1. 宿主机执行：  npm run auth:login   （微信扫码，自动生成 data/LibTV.lock）
+2. 确认凭据：    data/credentials.json + data/LibTV.lock
+3. Docker 挂载： -v $(pwd)/data:/app/data   （不要加 :ro，续期回写/解锁需要写权限）</pre>
        <div class="hint">授权完成后点下面的按钮刷新状态。refresh token 会自动续期，通常无需再次扫码。</div>
        <div style="margin-top:14px"><button class="ghost" onclick="loadStatus()">刷新授权状态</button></div>
      </div>
@@ -83,6 +83,8 @@ export function authPageHtml() {
       try{
         const r=await fetch('/auth/status');
         const j=await r.json();
+        // 页面打开期间若其他进程完成授权并上锁，直接刷新为锁定页
+        if(j.locked){window.location.reload();return}
         const el=document.getElementById('state');
         if(j.authorized){el.textContent='已授权';el.className='badge ok'}
         else{el.textContent='未授权';el.className='badge no'}
@@ -110,6 +112,29 @@ export function authPageHtml() {
     }
     loadStatus();
     `,
+  )
+}
+
+/** 授权锁已生效时展示：不再提供任何发起授权的入口 */
+export function authLockedHtml(lock = {}) {
+  const m = (s) => String(s ?? '—').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const via = lock.via === 'web' ? 'Web 授权页' : lock.via === 'cli' ? '宿主机 CLI' : '—'
+  return shell(
+    'LibTV 已授权',
+    `<h1>LibTV 已授权</h1>
+     <div class="sub">授权成功后网关会生成 <code>data/LibTV.lock</code>，授权入口随之关闭，避免重复授权覆盖当前账号。</div>
+     <div class="card">
+       <div class="row"><span class="k">授权状态</span><span class="v"><span class="badge ok">已授权 · 已锁定</span></span></div>
+       <div class="row"><span class="k">授权渠道</span><span class="v">${m(via)}</span></div>
+       <div class="row"><span class="k">授权时间</span><span class="v">${m(lock.authorized_at)}</span></div>
+       <div class="row"><span class="k">Refresh 失败</span><span class="v">${m(lock.refresh_failures)} / ${m(lock.max_refresh_failures)}</span></div>
+     </div>
+     <div class="card" style="font-size:14px">
+       授权凭据由服务端自动续期，通常无需再次扫码。若 token 过期且无法续期，或 refresh 连续失败达到上限，
+       网关会自动删除锁文件并清除凭据，届时本页会重新开放并提示授权。
+       <div class="hint">确需更换账号：停止网关后在宿主机执行 <code>npm run auth:logout</code>（同时清除凭据与锁），再访问 <code>/auth</code>。</div>
+     </div>
+     <div class="card"><a href="/docs">查看接口文档</a> · <a href="/auth/status">授权状态 JSON</a></div>`,
   )
 }
 

@@ -17,6 +17,14 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { DATA_DIR } from './paths.mjs'
+import {
+  acquireAuthLock,
+  releaseAuthLock,
+  isAuthLocked,
+  authLockInfo,
+  recordRefreshFailure,
+  resetRefreshFailures,
+} from './auth-lock.mjs'
 
 export const ISSUER = process.env.LIBTV_ISSUER || 'https://mcp.liblib.tv'
 export const MCP_URL = process.env.LIBTV_MCP_URL || 'https://mcp.liblib.tv/mcp'
@@ -85,6 +93,14 @@ export function saveCreds(creds) {
 
 export function clearCreds() {
   try { fs.unlinkSync(CRED_FILE) } catch { /* 本就不存在 */ }
+  releaseAuthLock('credentials_cleared')
+}
+
+/** 授权彻底失效：凭据与锁一起清掉，让 /auth 立即重新开放 */
+function invalidateAuth(reason) {
+  try { fs.unlinkSync(CRED_FILE) } catch { /* 本就不存在 */ }
+  releaseAuthLock(reason)
+  console.error(`[auth] ${reason}：本地授权已解除，请重新访问 /auth 授权页（或执行 npm run auth:login）`)
 }
 
 let metaCache
@@ -261,14 +277,19 @@ export async function login({ onAuthorizeUrl } = {}) {
     body: form,
   })
   if (!res.ok) throw new Error(`换取 token 失败：HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`)
-  return storeTokens(loadCreds(), await res.json())
+  const tokens = storeTokens(loadCreds(), await res.json())
+  acquireAuthLock({ via: 'cli' }) // 授权成功 → 关闭 /auth
+  return tokens
 }
 
 let refreshing = null
 async function refresh(creds) {
   const meta = await discover()
   const refreshToken = creds.tokens?.refresh_token
-  if (!refreshToken) throw new AuthRequired()
+  if (!refreshToken) {
+    invalidateAuth('refresh token 缺失')
+    throw new AuthRequired('LibTV 授权已失效（缺少 refresh token），授权锁已自动解除。请重新访问 /auth 授权页，或在宿主机执行 npm run auth:login。')
+  }
   const { resource } = await discoverResource()
   const form = new URLSearchParams({
     grant_type: 'refresh_token',
@@ -277,26 +298,51 @@ async function refresh(creds) {
     resource: resource || MCP_URL,
   })
   if (creds.client_secret) form.set('client_secret', creds.client_secret)
-  const res = await fetch(meta.token_endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-    body: form,
-  })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    clearCreds()
-    throw new AuthRequired(`授权已失效（refresh HTTP ${res.status} ${body.slice(0, 200)}），请重新运行 npm run auth:login`)
+
+  let tokenBody
+  try {
+    const res = await fetch(meta.token_endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: form,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`)
+    tokenBody = await res.json()
+  } catch (err) {
+    // 单次失败（网络抖动 / 服务端 5xx）保留授权与锁，仅累计次数；
+    // 达到阈值才彻底解除授权并开放 /auth。
+    const { failures, max, exhausted } = recordRefreshFailure(err.message)
+    if (exhausted) {
+      invalidateAuth(`refresh 连续失败 ${failures} 次`)
+      throw new AuthRequired(
+        `LibTV 授权已失效：refresh 连续失败 ${failures} 次（${err.message}）。授权锁已自动解除，` +
+        `请重新访问 /auth 授权页，或在宿主机执行 npm run auth:login。`,
+      )
+    }
+    const transient = new Error(`LibTV token 刷新失败（第 ${failures}/${max} 次）：${err.message}`)
+    transient.code = 'AUTH_REFRESH_TRANSIENT'
+    throw transient
   }
-  return storeTokens(creds, await res.json())
+  resetRefreshFailures()
+  return storeTokens(creds, tokenBody)
 }
 
 // force=true 用于服务端提前吊销 token（401）的场景
 export async function getAccessToken({ force = false } = {}) {
   const creds = loadCreds()
-  if (!creds.tokens?.access_token) throw new AuthRequired()
+  if (!creds.tokens?.access_token) {
+    // 凭据被手工删除但锁还在：解锁，否则 /auth 永远无法访问
+    if (isAuthLocked()) releaseAuthLock('access_token_missing')
+    throw new AuthRequired()
+  }
   const expiresAt = creds.tokens.expires_at
+  const expired = typeof expiresAt === 'number' && expiresAt <= Date.now()
   const stillFresh = typeof expiresAt !== 'number' || expiresAt - 60_000 > Date.now()
   if (!force && stillFresh) return creds.tokens.access_token
+  if (!creds.tokens.refresh_token && expired) {
+    invalidateAuth('access token 已过期且无 refresh token')
+    throw new AuthRequired('LibTV 授权已过期且无法静默续期，授权锁已自动解除。请重新访问 /auth 授权页，或在宿主机执行 npm run auth:login。')
+  }
   if (!refreshing) refreshing = refresh(loadCreds()).finally(() => { refreshing = null })
   return (await refreshing).access_token
 }
@@ -311,6 +357,7 @@ export function authSummary() {
     expiresAt: creds.tokens?.expires_at ? new Date(creds.tokens.expires_at).toISOString() : null,
     hasRefreshToken: Boolean(creds.tokens?.refresh_token),
     redirectUris: creds.redirect_uris || (creds.redirect_uri ? [creds.redirect_uri] : []),
+    lock: authLockInfo(),
   }
 }
 
@@ -325,6 +372,13 @@ function prunePending() {
   for (const [state, v] of pendingWebLogins) {
     if (now - v.createdAt > WEB_LOGIN_TTL_MS) pendingWebLogins.delete(state)
   }
+}
+
+/** 锁生效后仍允许"已发起的在途授权"回调，防止竞态把正常授权打断 */
+export function hasPendingWebLogin(state) {
+  if (!state) return false
+  prunePending()
+  return pendingWebLogins.has(state)
 }
 
 /** 发起 Web 授权：返回官方 authorize URL + state，凭据由 /auth/callback 落地 */
@@ -389,6 +443,7 @@ export async function completeWebLogin({ state, code, error, errorDescription })
   })
   if (!res.ok) throw new Error(`换取 token 失败：HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 300)}`)
   storeTokens(creds, await res.json())
+  acquireAuthLock({ via: 'web' }) // 授权成功 → 关闭 /auth
   // 授权凭据已更新：让 MCP 会话失效，下次调用会用新 token 重握手
   return authSummary()
 }

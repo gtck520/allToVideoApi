@@ -117,7 +117,7 @@ async function cmdAuthLogin() {
 function cmdAuthLogout() {
   clearCreds()
   resetSession()
-  out({ ok: true, message: '本地凭据已清除' })
+  out({ ok: true, message: '本地凭据与 LibTV.lock 授权锁已清除，可重新访问 /auth 授权' })
 }
 
 async function cmdTools() {

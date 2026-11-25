@@ -16,8 +16,9 @@ import { listModels, resolveModel, getModelContract, getModelContracts, generati
 import { runJob, sizeToRatio, nToCount, getJob, publicView } from './orchestrator.mjs'
 import { findMirrored } from './mirror.mjs'
 import { openapi, markdownDoc, htmlDoc } from './docs.mjs'
-import { authPageHtml, authResultHtml } from './auth-page.mjs'
-import { authSummary, startWebLogin, completeWebLogin, webAuthAvailable } from './oauth.mjs'
+import { authPageHtml, authResultHtml, authLockedHtml } from './auth-page.mjs'
+import { authSummary, startWebLogin, completeWebLogin, webAuthAvailable, hasPendingWebLogin } from './oauth.mjs'
+import { isAuthLocked, authLockInfo } from './auth-lock.mjs'
 import { initialize, callTool, resetSession } from './mcp.mjs'
 
 const MAX_BODY = 26 * 1024 * 1024 // 图片上传上限 25MB + 余量
@@ -379,12 +380,19 @@ export function startServer() {
         return void res.end(body)
       }
 
-      // Web 授权页 / 回调（免鉴权）
-      if (route === 'GET /auth') return void sendHtml(res, 200, authPageHtml())
+      // Web 授权页 / 回调（免鉴权；授权锁生效后关闭入口）
+      if (route === 'GET /auth') {
+        const lock = authLockInfo()
+        return void sendHtml(res, 200, lock.locked ? authLockedHtml(lock) : authPageHtml())
+      }
       if (route === 'GET /auth/status') {
         const s = authSummary()
+        // 原始错误文本可能含服务端回显的敏感片段，仅本地 CLI 可见，不进免鉴权接口
+        const { last_failure_reason, ...publicLock } = s.lock
         return void sendJson(res, 200, {
           authorized: s.authorized,
+          locked: s.lock.locked,
+          lock: publicLock,
           scope: s.scope,
           expires_at: s.expiresAt,
           has_refresh_token: s.hasRefreshToken,
@@ -392,8 +400,21 @@ export function startServer() {
           web_auth_available: webAuthAvailable(),
         })
       }
-      if (route === 'POST /auth/start') return await handleAuthStart(res)
-      if (route === 'GET /auth/callback') return await handleAuthCallback(req, res, url)
+      if (route === 'POST /auth/start') {
+        if (isAuthLocked()) {
+          return void sendError(res, 409,
+            'LibTV 已授权且授权锁生效，禁止重复授权。如需更换账号，请在宿主机执行 npm run auth:logout 后再访问 /auth。',
+            'auth_locked')
+        }
+        return await handleAuthStart(res)
+      }
+      if (route === 'GET /auth/callback') {
+        // 锁生效后仅放行"锁生成前已发起"的在途授权，避免竞态打断正常回调
+        if (isAuthLocked() && !hasPendingWebLogin(url.searchParams.get('state'))) {
+          return void sendHtml(res, 409, authLockedHtml(authLockInfo()))
+        }
+        return await handleAuthCallback(req, res, url)
+      }
 
       if (!checkAuth(req, url)) {
         sendError(res, 401, '无效的 API key：请以 Authorization: Bearer <GATEWAY_API_KEY> 方式携带', 'invalid_api_key', 'invalid_request_error')
