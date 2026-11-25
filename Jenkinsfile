@@ -29,36 +29,48 @@ pipeline {
             steps {
                 sh '''
                     set -e
-                    mkdir -p "$HOST_DIR/data"
+                    HELPER=all-to-video-api-helper
+                    docker rm -f "$HELPER" >/dev/null 2>&1 || true
 
-                    # 同步仓库文件到宿主机目录；保留宿主机已有的 .env 和 data
-                    if command -v rsync >/dev/null 2>&1; then
-                        rsync -a --delete \
-                          --exclude='.git' --exclude='.env' --exclude='data' --exclude='.workbuddy' \
-                          ./ "$HOST_DIR/"
-                    else
-                        tar --exclude='.git' --exclude='.env' --exclude='data' --exclude='.workbuddy' \
-                          -cf - . | tar -xf - -C "$HOST_DIR"
-                    fi
+                    # Jenkins 容器内的路径与 Docker 守护进程看到的宿主机路径不一致，
+                    # 因此用 docker cp 把工作区文件送进挂载了宿主机目录的临时容器。
+                    docker create --name "$HELPER" -v "$HOST_DIR:/dst" alpine sleep infinity >/dev/null
 
-                    # 首次部署：生成 .env（API key 随机生成且不打印）
-                    if [ ! -f "$HOST_DIR/.env" ]; then
-                        cp .env.example "$HOST_DIR/.env"
-                        KEY=$(openssl rand -hex 24)
-                        sed -i "s|^GATEWAY_API_KEY=.*|GATEWAY_API_KEY=sk-$KEY|" "$HOST_DIR/.env"
-                        sed -i "s|^GATEWAY_PORT=.*|GATEWAY_PORT=8787|" "$HOST_DIR/.env"
-                        if [ -n "${LIBTV_PROJECT_ID}" ]; then
-                            sed -i "s|^LIBTV_PROJECT_ID=.*|LIBTV_PROJECT_ID=${LIBTV_PROJECT_ID}|" "$HOST_DIR/.env"
+                    # 项目 uuid 不进入构建日志：写入文件后由 helper 容器内部读取
+                    set +x
+                    printf '%s' "${LIBTV_PROJECT_ID}" > .deploy-project-id
+                    set -x
+
+                    tar --exclude='.git' --exclude='.env' --exclude='data' --exclude='.workbuddy' \
+                      --exclude='.deploy-project-id' -cf /tmp/all-to-video-api-src.tar .
+                    docker cp /tmp/all-to-video-api-src.tar "$HELPER":/src.tar
+                    docker cp .deploy-project-id "$HELPER":/tmp/project-id
+                    docker start "$HELPER" >/dev/null
+
+                    docker exec "$HELPER" sh -c '
+                        set -e
+                        mkdir -p /dst/data
+                        tar -xf /src.tar -C /dst
+                        if [ ! -f /dst/.env ]; then
+                            cp /dst/.env.example /dst/.env
+                            KEY=$(od -An -N24 -tx1 /dev/urandom | tr -d " \\n")
+                            sed -i "s|^GATEWAY_API_KEY=.*|GATEWAY_API_KEY=sk-$KEY|" /dst/.env
+                            sed -i "s|^GATEWAY_PORT=.*|GATEWAY_PORT=8787|" /dst/.env
+                            PID=$(cat /tmp/project-id)
+                            if [ -n "$PID" ]; then
+                                sed -i "s|^LIBTV_PROJECT_ID=.*|LIBTV_PROJECT_ID=$PID|" /dst/.env
+                            fi
+                            if ! grep -q "^GATEWAY_PUBLIC_URL=" /dst/.env; then
+                                echo "GATEWAY_PUBLIC_URL=http://127.0.0.1:8787" >> /dst/.env
+                            fi
+                            echo "Initialized .env (API key hidden)"
                         fi
-                        if ! grep -q '^GATEWAY_PUBLIC_URL=' "$HOST_DIR/.env"; then
-                            echo 'GATEWAY_PUBLIC_URL=http://127.0.0.1:8787' >> "$HOST_DIR/.env"
-                        fi
-                        echo "Initialized $HOST_DIR/.env (generated API key is hidden)"
-                    fi
-                    chmod 600 "$HOST_DIR/.env" || true
+                        chmod 600 /dst/.env || true
+                        ls -la /dst | head -30
+                    '
 
-                    echo "Host directory: $HOST_DIR"
-                    ls -la "$HOST_DIR" | head -30
+                    rm -f .deploy-project-id /tmp/all-to-video-api-src.tar
+                    docker rm -f "$HELPER" >/dev/null 2>&1 || true
                 '''
             }
         }
