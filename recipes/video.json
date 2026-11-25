@@ -1,0 +1,49 @@
+{
+  "name": "文生视频验证",
+  "note": "参数按 2026-11-25 实测 schema 校准。走 generation_submit(kind=video)。modelKey 来自实测 search_models。图生视频需先用 upload_ticket/upload_complete 上传参考图拿到 fileRef/node，再按 get_model 契约填 referenceImageNodes。",
+  "context": {
+    "modelKey": "motion-3.1-lite",
+    "projectId": "{{env.LIBTV_PROJECT_ID}}",
+    "idempotencyKey": "probe-video-20261125-0001",
+    "prompt": "slow cinematic camera push-in over gentle ocean waves, warm sunset light, 5 seconds"
+  },
+  "steps": [
+    {
+      "id": "models",
+      "tool": "search_models",
+      "args": { "action": "search", "nodeType": "video", "query": "video" },
+      "note": "列出当前视频模型"
+    },
+    {
+      "id": "contract",
+      "tool": "get_model",
+      "args": { "model": "{{ctx.modelKey}}" },
+      "note": "取视频模型真实参数契约（duration/ratio/resolution 等）。实测 video 模型：motion-3.1-lite/motion-3.1-rapid/midjourney-video/star-video2.5 等，以 search 返回为准"
+    },
+    {
+      "id": "submit",
+      "tool": "generation_submit",
+      "args": {
+        "project_id": "{{ctx.projectId}}",
+        "idempotency_key": "{{ctx.idempotencyKey}}",
+        "kind": "video",
+        "request": {
+          "model": "{{ctx.modelKey}}",
+          "prompt": "{{ctx.prompt}}",
+          "params": {}
+        }
+      },
+      "note": "文生视频：params 先留空用默认值。完成后按 contract 补 duration/ratio 等。返回里找 task_id"
+    },
+    {
+      "id": "status",
+      "tool": "task_status",
+      "args": {
+        "task_id": "{{steps.submit.task_id}}",
+        "project_id": "{{ctx.projectId}}"
+      },
+      "timeoutMs": 1200000,
+      "note": "视频生成通常数分钟，超时放宽到 20 分钟"
+    }
+  ]
+}

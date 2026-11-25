@@ -1,0 +1,37 @@
+{
+  "name": "导出验证",
+  "note": "导出依赖画布上已有的视频节点。真实工具 export_video 必填 project_id / idempotency_key / clips（clips 里是 node_key 列表）。注意：工具清单里没有 export_status，导出任务状态用 task_status 查。此配方需先跑完 image/video 让画布产生节点，再从 get_project_snapshot / read_timeline 拿到 node_key 填入 clipKeys。",
+  "context": {
+    "projectId": "{{env.LIBTV_PROJECT_ID}}",
+    "idempotencyKey": "probe-export-20261125-0001",
+    "clipKeys": []
+  },
+  "steps": [
+    {
+      "id": "snapshot",
+      "tool": "get_project_snapshot",
+      "args": { "project_id": "{{ctx.projectId}}" },
+      "note": "先看画布节点，找出视频节点的 node_key"
+    },
+    {
+      "id": "readiness",
+      "tool": "export_readiness",
+      "args": {
+        "project_id": "{{ctx.projectId}}",
+        "clips": []
+      },
+      "note": "导出前置检查。clips 填 [{\"node_key\":\"<上一步拿到的>\"}]。参数细节用 npm run inspect -- export_readiness 查"
+    },
+    {
+      "id": "export",
+      "tool": "export_video",
+      "args": {
+        "project_id": "{{ctx.projectId}}",
+        "idempotency_key": "{{ctx.idempotencyKey}}",
+        "clips": []
+      },
+      "timeoutMs": 1200000,
+      "note": "发起导出，clips 填 [{\"node_key\":\"...\"}]。返回 task_id 后用下一步查"
+    }
+  ]
+}

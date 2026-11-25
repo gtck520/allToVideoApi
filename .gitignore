@@ -1,0 +1,24 @@
+# ========== 私有凭据 / 账号数据（绝不入库）==========
+# OAuth access_token / refresh_token / client_id（ libtv-probe 扫码授权后生成）
+data/credentials.json
+# 网关自动生成的 API key
+data/gateway-key.json
+# 任何运行时私密配置（如用户自建 .env）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ========== 运行时数据（含 prompt、任务、结果、游标，避免泄露使用记录）==========
+data/*
+!data/.gitkeep
+
+# ========== 开发过程记忆 / 内部笔记 ==========
+.workbuddy/
+
+# ========== 依赖 / 缓存 / 日志 ==========
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

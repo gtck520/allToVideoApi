@@ -1,0 +1,58 @@
+{
+  "name": "文生图验证",
+  "note": "参数按 2026-11-25 实测 schema 校准。generation_submit 的 params 必须来自 get_model.inputContract.parameterSchemas，count 是 enum[1,2,4]。project_id 用账号现成画布 uuid；idempotency_key 用 UUID，重跑同一 key 会幂等返回同一任务。",
+  "context": {
+    "modelKey": "lib-image-2.6-a",
+    "projectId": "{{env.LIBTV_PROJECT_ID}}",
+    "idempotencyKey": "probe-image-20261125-0001",
+    "prompt": "a cinematic photo of a red bicycle by the sea at sunset, warm golden light, 16:9"
+  },
+  "steps": [
+    {
+      "id": "models",
+      "tool": "search_models",
+      "args": { "action": "search", "nodeType": "image", "query": "image" },
+      "note": "列出当前可用图像模型，确认 modelKey"
+    },
+    {
+      "id": "contract",
+      "tool": "get_model",
+      "args": { "model": "{{ctx.modelKey}}" },
+      "note": "取该模型的真实参数契约（ratio/quality/resolution/count 等）"
+    },
+    {
+      "id": "submit",
+      "tool": "generation_submit",
+      "args": {
+        "project_id": "{{ctx.projectId}}",
+        "idempotency_key": "{{ctx.idempotencyKey}}",
+        "kind": "image",
+        "request": {
+          "model": "{{ctx.modelKey}}",
+          "prompt": "{{ctx.prompt}}",
+          "params": { "count": 1, "ratio": "16:9", "quality": "medium" }
+        }
+      },
+      "note": "提交生成。params 里的键必须是 contract 步骤 parameterSchemas 允许的，否则会被拒。返回里找 task_id"
+    },
+    {
+      "id": "status",
+      "tool": "task_status",
+      "args": {
+        "task_id": "{{steps.submit.task_id}}",
+        "project_id": "{{ctx.projectId}}"
+      },
+      "timeoutMs": 1200000,
+      "note": "权威查询任务状态。终态看 readiness=TERMINAL_READY + outcome=SUCCEEDED/FAILED。实测 PROCESSING→约1分钟内终态"
+    },
+    {
+      "id": "media",
+      "tool": "inspect_media",
+      "args": {
+        "node": "{{steps.status.artifacts.0.node_key}}",
+        "projectId": "{{ctx.projectId}}"
+      },
+      "note": "task_status.result 里没有图片 URL，要用 artifacts[0].node_key 换 media.urls[0] 直链。注意本工具参数是 camelCase projectId"
+    }
+  ]
+}

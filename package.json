@@ -1,0 +1,23 @@
+{
+  "name": "libtv-openai-gateway",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "LibTV MCP → OpenAI 兼容图像/视频生成 API 网关（单用户自用）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node bin/gateway.mjs",
+    "auth:status": "node bin/libtv-probe.mjs auth status",
+    "auth:login": "node bin/libtv-probe.mjs auth login",
+    "auth:logout": "node bin/libtv-probe.mjs auth logout",
+    "tools": "node bin/libtv-probe.mjs tools",
+    "probe": "node bin/libtv-probe.mjs probe",
+    "inspect": "node bin/libtv-probe.mjs inspect",
+    "call": "node bin/libtv-probe.mjs call",
+    "verify": "node bin/libtv-probe.mjs verify",
+    "cli:install": "node bin/libtv-probe.mjs cli install",
+    "cli:probe": "node bin/libtv-probe.mjs cli probe"
+  }
+}
