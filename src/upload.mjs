@@ -52,14 +52,15 @@ async function putPart(url, bytes) {
  * @param {string} fileName 文件名（带扩展名）
  * @param {string} jobId 用于幂等键
  */
-export async function uploadImageToCanvas(bytes, fileName, jobId) {
+export async function uploadImageToCanvas(bytes, fileName, jobId, projectId) {
   const fileSize = bytes.length
   if (fileSize > 200 * 1024 * 1024) throw new NonRetryableError('图片超过 200MB 上限')
   if (fileSize === 0) throw new NonRetryableError('图片内容为空')
+  const pid = projectId || config.PROJECT_ID
 
   // 1. 申请签名分片 URL（幂等安全：纯资源创建）
   const ticket = await withRetry(
-    () => toolJson('upload_ticket', { file_name: fileName, file_size: fileSize, projectId: config.PROJECT_ID }),
+    () => toolJson('upload_ticket', { file_name: fileName, file_size: fileSize, projectId: pid }),
     { attempts: 3, base: 1000, onRetry: (e, a, w) => console.error(`[upload] ticket 重试 ${a}，${w}ms 后：${e.message.slice(0, 120)}`) },
   )
   const uploadId = ticket.upload_id ?? ticket.uploadId ?? ticket.uploadID
@@ -96,7 +97,7 @@ export async function uploadImageToCanvas(bytes, fileName, jobId) {
   const key = idempotencyKey(jobId, 'uploadmedia')
   const nodeName = `gw-${jobId}-ref`
   const media = await withRetry(
-    () => toolJson('upload_media', { name: nodeName, idempotencyKey: key, fileRef, mediaType: 'image', projectId: config.PROJECT_ID }),
+    () => toolJson('upload_media', { name: nodeName, idempotencyKey: key, fileRef, mediaType: 'image', projectId: pid }),
     { attempts: 3, base: 1500 },
   )
   const nodeId = media.nodeId ?? media.node_id ?? media.resourceId ?? media.resource_id

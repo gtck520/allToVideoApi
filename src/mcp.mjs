@@ -6,6 +6,7 @@
 //   4. HTTP 401 = token 被提前吊销，强制 refresh 后重发一次
 
 import { MCP_URL, getAccessToken, AuthRequired } from './oauth.mjs'
+import { logMcp } from './logger.mjs'
 
 const PROTOCOL_VERSION = '2025-06-18'
 const CLIENT_INFO = { name: 'libtv-mcp-probe', version: '0.1.0' }
@@ -122,18 +123,29 @@ export async function listTools() {
 export async function callTool(name, args = {}, { timeoutMs = TOOL_TIMEOUT_MS, onProgress } = {}) {
   await initialize()
   const started = Date.now()
-  const messages = await sendOnce(
-    { jsonrpc: '2.0', id: `probe-call-${Date.now()}`, method: 'tools/call', params: { name, arguments: args } },
-    timeoutMs,
-  )
+  let messages
+  try {
+    messages = await sendOnce(
+      { jsonrpc: '2.0', id: `probe-call-${Date.now()}`, method: 'tools/call', params: { name, arguments: args } },
+      timeoutMs,
+    )
+  } catch (err) {
+    logMcp({ tool: name, method: 'tools/call', ok: false, ms: Date.now() - started, args, error: String(err.message || err).slice(0, 300) })
+    throw err
+  }
   for (const msg of messages) {
-    if (msg?.error) return { ok: false, error: msg.error, elapsedMs: Date.now() - started, raw: msg }
+    if (msg?.error) {
+      logMcp({ tool: name, method: 'tools/call', ok: false, ms: Date.now() - started, args, error: String(msg.error?.message || JSON.stringify(msg.error)).slice(0, 300) })
+      return { ok: false, error: msg.error, elapsedMs: Date.now() - started, raw: msg }
+    }
     if (msg?.result) {
       const result = msg.result
+      logMcp({ tool: name, method: 'tools/call', ok: result.isError !== true, ms: Date.now() - started, args })
       onProgress?.(result)
       return { ok: result.isError !== true, result, elapsedMs: Date.now() - started, raw: msg }
     }
   }
+  logMcp({ tool: name, method: 'tools/call', ok: false, ms: Date.now() - started, args, error: '未识别的响应' })
   return { ok: false, error: '未识别的响应', elapsedMs: Date.now() - started, raw: messages }
 }
 

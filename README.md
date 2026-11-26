@@ -163,9 +163,9 @@ curl -X POST http://127.0.0.1:8787/v1/images/generations \
   -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "lib-image-2.6-a",
+    "model": "z-image",
     "prompt": "a cat on the moon",
-    "params": {"ratio": "16:9", "resolution": "1K", "count": 1}
+    "params": {"ratio": "16:9", "quality": "1K", "count": 1}
   }'
 ```
 
@@ -175,7 +175,7 @@ curl -X POST http://127.0.0.1:8787/v1/images/generations \
 {
   "created": 1760000000,
   "data": [{"url": "https://libtv-res.liblib.art/....png", "source_url": "https://libtv-res.liblib.art/....png"}],
-  "libtv": {"job_id": "img_xxx", "model": "lib-image-2.6-a", "node_key": "..."}
+  "libtv": {"job_id": "img_xxx", "model": "z-image", "node_key": "..."}
 }
 ```
 
@@ -274,7 +274,7 @@ console.log(result.data[0].url)
 | 密钥 | `/www/all-to-videoApi/.env` 里的 `GATEWAY_API_KEY` |
 | 模型列表 | 拉取后勾选需要的模型；图像模型和视频模型分开勾选，模型名与 `/v1/models` 返回的 id 保持一致 |
 
-**图像生成**：走 `/v1/images/generations`，标准字段 `model` / `prompt` / `n` / `size` 均可直接用；`n` 映射为 LibTV 的 `count`，`size` 就近映射为画幅。更精细的控制（清晰度、比例、数量枚举）放 `params` 透传。
+**图像生成**：走 `/v1/images/generations`，标准字段 `model` / `prompt` / `n` / `size` 均可直接用；`n` 映射为 LibTV 的 `count`，`size` 就近映射为画幅。更精细的控制（清晰度、比例、数量枚举）放 `params` 透传。低成本批量生成优先用 `z-image`（默认 1K，可选 2K/4K），不要用 `seedream-4.5`。
 
 **视频生成**：走 `/v1/videos`，同时接受 JSON 和 `multipart/form-data`。New API 发过来的 `duration`、`width`、`height` 会被映射为 LibTV 参数，`image` 字段支持文件或 URL/base64。任务返回 OpenAI Sora 风格：
 
@@ -338,15 +338,28 @@ ssh -L 8787:127.0.0.1:8787 <用户名>@<服务器>
 |---|---|---|
 | `GATEWAY_API_KEY` | 对外 Bearer key | 自动生成到 `data/gateway-key.json` |
 | `GATEWAY_PORT` | 监听端口 | `8787` |
-| `LIBTV_PROJECT_ID` | **必填**，画布 uuid | 无 |
+| `LIBTV_PROJECT_ID` | **必填**，画布 uuid（开启按日期归档后作为兜底画布） | 无 |
+| `CANVAS_BY_DATE` | `true` 时每天自动创建「CANVAS_NAME_PREFIX-YYYY-MM-DD」画布，当天生成进当天画布，方便按天归档/整体清理 | `true` |
+| `CANVAS_NAME_PREFIX` | 按日期画布的名称前缀 | `API网关` |
 | `DEFAULT_IMAGE_MODEL` / `DEFAULT_VIDEO_MODEL` | 不传 `model` 时的默认模型 | `lib-image-2.6-a` / `motion-3.1-lite` |
 | `MIRROR_RESULTS` | `true` 时把结果转存到本地并暴露 `/files/...` | `false` |
 | `FILES_RETENTION_HOURS` | 本地镜像保留时长，`0` 为永久 | `168` |
-| `CLEANUP_CANVAS_NODES` | 完成后删除画布上的临时节点 | `true` |
+| `CLEANUP_CANVAS_NODES` | 是否清理画布节点；`false` 则永久保留，方便在 LibTV 复查 | `true` |
+| `CANVAS_NODE_RETENTION_HOURS` | 仅上面为 `true` 时生效：`0`=立即删除，`N`=保留 N 小时后自动删除 | `0` |
+| `LOG_RETENTION_HOURS` | HTTP 访问日志与 MCP 出站日志保留时长，`0` 为永久 | `168` |
 | `MAX_CONCURRENT_GENERATIONS` | 同时进行的生成数上限 | `3` |
 | `AUTH_REFRESH_MAX_FAILURES` | 刷新连续失败多少次后要求重新授权 | `3` |
 
 **结果地址**：默认直接返回 LibTV 的原始公网直链；如需稳定地址或担心直链时效，设 `MIRROR_RESULTS=true`，此时结果会转存到 `data/results/`，接口返回 `http://<你的服务地址>/files/<任务id>`。
+
+**画布归档**：默认 `CANVAS_BY_DATE=true`，每天第一次生成时自动在 LibTV 创建（或复用）一个「API网关-2026-11-26」这样的日期画布，当天所有任务都落在里面；画布 uuid 的映射存在 `data/canvases.json`，重启不丢。想清理历史生成时，直接在 LibTV 删除整天的画布即可。创建失败（网络/权限）时自动降级用 `LIBTV_PROJECT_ID` 指定的画布，不影响生成。
+
+**画布节点留存**：默认生成成功后立即删除本次创建的画布节点。若想在 LibTV 里复查生成结果、保留证据，设 `CLEANUP_CANVAS_NODES=false` 可永久保留；若只想暂存一段时间，保持 `CLEANUP_CANVAS_NODES=true` 并设 `CANVAS_NODE_RETENTION_HOURS=24`（示例为保留 24 小时），到期的节点会在服务启动时及每 10 分钟由后台自动清理，重启不会丢失清理计划。
+
+**日志留存**：网关会把两类日志按天写入 `data/logs/`，默认保留 7 天，可用 `LOG_RETENTION_HOURS` 调整（`0` 表示永久）：
+- `http-YYYY-MM-DD.log`：收到的 HTTP 请求，含方法、路径、状态码、耗时、来源 IP、请求体字节数、模型、prompt 片段、任务 id、错误信息；
+- `mcp-YYYY-MM-DD.log`：去 LibTV 的 MCP 请求，含工具名、参数摘要、是否成功、耗时、错误信息。
+日志只记元数据，不记录 `Authorization`、Cookie、图片字节等敏感内容。
 
 ---
 

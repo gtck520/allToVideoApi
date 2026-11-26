@@ -22,6 +22,7 @@ import { authPageHtml, authResultHtml, authLockedHtml } from './auth-page.mjs'
 import { authSummary, startWebLogin, completeWebLogin, webAuthAvailable, hasPendingWebLogin } from './oauth.mjs'
 import { isAuthLocked, authLockInfo } from './auth-lock.mjs'
 import { initialize, callTool, resetSession } from './mcp.mjs'
+import { logRequest } from './logger.mjs'
 
 const MAX_BODY = 26 * 1024 * 1024 // 图片上传上限 25MB + 余量
 
@@ -277,8 +278,10 @@ async function handleImageGeneration(req, res, bodyBuf) {
     { ratio: sizeToRatio(body.size), count: nToCount(body.n) },
     body.params,
   )
+  req.logContext = { type: 'image', model, prompt: String(prompt).slice(0, 120), params: libtvParams }
 
   const job = await runJob({ type: 'image', model, params: { prompt, libtvParams, openai: { size: body.size, n: body.n } } })
+  if (job) req.logContext.job_id = job.id
 
   if (job.status === 'processing') {
     // 同步接口超时兜底：任务保留，客户端可带 job id 再查
@@ -305,7 +308,9 @@ async function handleImageEdit(req, res, bodyBuf) {
   const model = resolveModel(fields.model, 'image')
   // multipart 里 params 是 JSON 字符串、JSON 请求里是对象——parseMaybeJson 两种都能处理
   const libtvParams = mergeLibtvParams({ ratio: sizeToRatio(fields.size) }, parseMaybeJson(fields.params))
+  req.logContext = { type: 'image-edit', model, prompt: String(prompt).slice(0, 120), params: libtvParams }
   const job = await runJob({ type: 'image-edit', model, params: { prompt, libtvParams }, transient: { imageBytes: image.bytes, fileName: image.fileName } })
+  if (job) req.logContext.job_id = job.id
   if (job.status === 'processing') {
     sendError(res, 504, `图像编辑超时未到终态，任务已保留：可用 GET /v1/videos/${job.id} 继续查询`, 'timeout', 'api_error')
     return
@@ -336,6 +341,14 @@ async function handleVideoCreate(req, res, bodyBuf) {
     },
     parseMaybeJson(fields.params),
   )
+  req.logContext = {
+    type: 'video',
+    model,
+    prompt: String(prompt).slice(0, 120),
+    params: libtvParams,
+    has_image: !!image,
+    image_kind: image?.bytes ? 'file' : image ? 'url_or_base64' : null,
+  }
 
   // 可选参考图：multipart 文件、公网 URL 或 base64（图生视频）
   let referenceNodeId = null
@@ -359,6 +372,7 @@ async function handleVideoCreate(req, res, bodyBuf) {
   }
 
   const job = await runJob({ type: 'video', model, params: { prompt, libtvParams, referenceNodeId } })
+  if (job) req.logContext.job_id = job.id
   if (job.status === 'failed') {
     sendError(res, 500, job.error.message, job.error.code, 'api_error')
     return
@@ -442,6 +456,22 @@ export function startServer() {
     const url = new URL(req.url, 'http://localhost')
     const route = `${req.method} ${url.pathname}`
     const started = Date.now()
+    const requestId = `req_${started.toString(36)}${Math.random().toString(36).slice(2, 8)}`
+    res.setHeader('x-request-id', requestId)
+    let errorSummary = null
+    res.on('finish', () => {
+      logRequest({
+        req_id: requestId,
+        method: req.method,
+        path: url.pathname,
+        status: res.statusCode,
+        ms: Date.now() - started,
+        ip: req.socket?.remoteAddress,
+        body_bytes: Number(req.headers['content-length'] || 0),
+        ...(req.logContext || {}),
+        ...(errorSummary ? { error: errorSummary } : {}),
+      })
+    })
     try {
       // 免鉴权：首页 / 模型广场 / 探活 / 接口文档（Agent 可直接读取对接）
       if (route === 'GET /') return void sendHtml(res, 200, homeHtml(), 'public, max-age=300')
@@ -535,6 +565,7 @@ export function startServer() {
     } catch (err) {
       const status = err instanceof NonRetryableError ? err.httpStatus || 400 : 500
       const code = err instanceof NonRetryableError ? err.code : 'internal_error'
+      errorSummary = err.message.slice(0, 300)
       console.error(`[http] ${route} ${status} ${Date.now() - started}ms :: ${err.message.slice(0, 200)}`)
       if (!res.headersSent) sendError(res, status, err.message.slice(0, 500), code, status >= 500 ? 'api_error' : 'invalid_request_error')
     }

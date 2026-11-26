@@ -25,7 +25,9 @@ src/orchestrator.mjs   三条流水线（生成 / 编辑 / 视频）+ 重试编�
 src/libtv.mjs          工具封装：提交 / 轮询 / 取媒体 URL / 模型发现 / 并发信号量
 src/upload.mjs         参考图上传链：ticket → OSS 裸 PUT → complete → upload_media
 src/mirror.mjs         结果镜像转存 + 本地过期清扫
-src/cleanup.mjs        画布节点"用完即删"
+src/canvas.mjs         按日期画布归档（自动建「前缀-YYYY-MM-DD」画布，映射持久化 data/canvases.json）
+src/cleanup.mjs        画布节点保留/清理（立即、延迟、永久保留）
+src/logger.mjs         HTTP 访问日志 + MCP 出站日志（按天 JSON Lines）
 src/jobs.mjs           任务持久化（data/jobs/*.json）+ 对外视图
 src/retry.mjs          错误分类 + 指数退避
 src/config.mjs         .env / 环境变量配置 + API key 固化
@@ -134,7 +136,7 @@ GET  /files/{jobId}[/{n}]              镜像文件（Bearer 或 ?key=）
 | `image-edit` | 参考图 `upload_ticket` → OSS 裸 PUT → `upload_complete` → `upload_media` → `create_node(left:[参考节点])` → 同图像链路 |
 | `video` | 纯文生视频 `generation_submit(kind=video)`；带参考图 `generate_video(referenceImageNodes)` → `task_status` → `inspect_media` |
 
-成功后：可选镜像（`MIRROR_RESULTS=true`）→ 清理本次创建的画布节点（默认开）→ 封装结果。图片字节用 `transient` 传递，不写进任务文件。
+成功后：可选镜像（`MIRROR_RESULTS=true`）→ 按策略处理画布节点（默认立即删除；可配置为永久保留或保留 N 小时后后台清扫）→ 封装结果。图片字节用 `transient` 传递，不写进任务文件。
 
 ### 5.5 任务状态机
 
@@ -185,7 +187,9 @@ GET  /files/{jobId}[/{n}]              镜像文件（Bearer 或 ?key=）
 | `GATEWAY_PUBLIC_URL` | Web 授权页回调基址（仅 loopback 有效） | 空 |
 | `MIRROR_RESULTS` | 是否镜像转存结果 | `false` |
 | `FILES_RETENTION_HOURS` | 镜像保留时长，`0` 永久 | `168` |
-| `CLEANUP_CANVAS_NODES` | 完成后删画布节点 | `true` |
+| `CLEANUP_CANVAS_NODES` | 是否清理画布节点；`false` 永久保留 | `true` |
+| `CANVAS_NODE_RETENTION_HOURS` | 仅上面为 `true` 时生效：`0` 立即删，`N` 保留 N 小时后后台清扫 | `0` |
+| `LOG_RETENTION_HOURS` | HTTP/MCP 日志保留时长，`0` 永久 | `168` |
 
 ---
 

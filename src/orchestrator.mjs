@@ -6,18 +6,19 @@
 import { config, ensureDirs } from './config.mjs'
 import { createJob, getJob, saveJob, logEvent, publicView, loadResumableJobs } from './jobs.mjs'
 import { submitGeneration, createNodeRun, generateVideoRun, waitForTask, fetchAllMedia, fetchMediaUrl, generationSlots, TimeoutError } from './libtv.mjs'
+import { resolveDailyCanvas } from './canvas.mjs'
 import { uploadImageToCanvas } from './upload.mjs'
 import { mirrorUrl } from './mirror.mjs'
-import { cleanupJobNodes } from './cleanup.mjs'
+import { scheduleCanvasCleanup } from './cleanup.mjs'
 import { NonRetryableError } from './retry.mjs'
 
 ensureDirs()
 
 /** 产物取回：多图并行取全部，单图走单个 */
-async function multiResult(st) {
+async function multiResult(st, projectId) {
   const keys = (st.artifacts || []).filter((a) => a?.node_key)
-  if (keys.length > 1) return fetchAllMedia(st.artifacts)
-  return fetchMediaUrl(keys[0]?.node_key ?? st.artifacts?.[0]?.node_key)
+  if (keys.length > 1) return fetchAllMedia(st.artifacts, projectId)
+  return fetchMediaUrl(keys[0]?.node_key ?? st.artifacts?.[0]?.node_key, projectId)
 }
 
 /** OpenAI size → LibTV ratio 枚举的宽松映射 */
@@ -51,49 +52,50 @@ async function runPipeline(job, transient = {}) {
   for (let attempt = 0; attempt <= config.FAILED_TASK_RETRIES; attempt++) {
     try {
       let media
+      const pid = job.projectId
       if (job.type === 'image') {
         const { taskId } = await submitGeneration({
-          jobId: job.id, kind: 'image', model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, attempt,
+          jobId: job.id, kind: 'image', model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, attempt, projectId: pid,
         })
         job.taskId = taskId
         saveJob(job)
         logEvent(job, `已提交任务 ${taskId}（尝试 ${attempt + 1}）`)
-        const st = await waitForTask(taskId, { timeoutMs: config.IMAGE_TIMEOUT_MS, onPoll: (s) => { job.progress = s.readiness } })
-        media = await multiResult(st)
+        const st = await waitForTask(taskId, { timeoutMs: config.IMAGE_TIMEOUT_MS, projectId: pid, onPoll: (s) => { job.progress = s.readiness } })
+        media = await multiResult(st, pid)
       } else if (job.type === 'image-edit') {
         // 1. 上传参考图（上传层内部自带重试与幂等）；图片字节在 transient，不进持久化
-        const { nodeId } = await uploadImageToCanvas(transient.imageBytes, transient.fileName, job.id + (attempt > 0 ? `-a${attempt}` : ''))
+        const { nodeId } = await uploadImageToCanvas(transient.imageBytes, transient.fileName, job.id + (attempt > 0 ? `-a${attempt}` : ''), pid)
         logEvent(job, `参考图已挂画布 node=${nodeId}`)
         job.referenceNodeId = nodeId
         // 2. 建节点并直接发起生成
         const { taskId } = await createNodeRun({
-          jobId: job.id, model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, referenceNodeIds: [nodeId], attempt,
+          jobId: job.id, model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, referenceNodeIds: [nodeId], attempt, projectId: pid,
         })
         job.taskId = taskId
         saveJob(job)
         logEvent(job, `编辑任务已提交 ${taskId}（尝试 ${attempt + 1}）`)
-        const st = await waitForTask(taskId, { timeoutMs: config.IMAGE_TIMEOUT_MS, onPoll: (s) => { job.progress = s.readiness } })
-        media = await multiResult(st)
+        const st = await waitForTask(taskId, { timeoutMs: config.IMAGE_TIMEOUT_MS, projectId: pid, onPoll: (s) => { job.progress = s.readiness } })
+        media = await multiResult(st, pid)
       } else if (job.type === 'video') {
         let out
         if (job.params.referenceNodeId) {
           // 图生视频：generate_video + referenceImageNodes（服务端等待到终态，超时由同幂等键恢复）
           out = await generateVideoRun({
             jobId: job.id, model: job.model, prompt: job.params.prompt, params: job.params.libtvParams,
-            referenceImageNodes: [job.params.referenceNodeId], attempt,
+            referenceImageNodes: [job.params.referenceNodeId], attempt, projectId: pid,
           })
         } else {
           // 纯文生视频：generation_submit(kind=video)，params={} 用默认值
           const { taskId } = await submitGeneration({
-            jobId: job.id, kind: 'video', model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, attempt,
+            jobId: job.id, kind: 'video', model: job.model, prompt: job.params.prompt, params: job.params.libtvParams, attempt, projectId: pid,
           })
           out = { taskId }
         }
         job.taskId = out.taskId
         saveJob(job)
         logEvent(job, `视频任务已提交 ${out.taskId}（尝试 ${attempt + 1}）`)
-        const st = await waitForTask(out.taskId, { timeoutMs: config.VIDEO_TIMEOUT_MS, onPoll: (s) => { job.progress = s.readiness } })
-        media = await multiResult(st)
+        const st = await waitForTask(out.taskId, { timeoutMs: config.VIDEO_TIMEOUT_MS, projectId: pid, onPoll: (s) => { job.progress = s.readiness } })
+        media = await multiResult(st, pid)
       }
 
       job.status = 'succeeded'
@@ -117,6 +119,7 @@ async function runPipeline(job, transient = {}) {
         width: item.width,
         height: item.height,
         node_key: item.nodeKey,
+        projectId: job.projectId,
       })
       job.result = {
         ...toView(items[0], 0),
@@ -124,11 +127,16 @@ async function runPipeline(job, transient = {}) {
       }
       logEvent(job, '完成', { url: job.result.url })
       saveJob(job)
-      // 2. 画布清理（尽力而为，失败不影响结果）
+      // 2. 画布节点保留策略：永久保留 / 立即清理 / 延迟清理（尽力而为，失败不影响结果）
       try {
-        const c = await cleanupJobNodes(job)
-        logEvent(job, `画布清理：${c.deleted}/${c.total} 个节点已删除`)
-        job.cleanedUp = c.deleted > 0
+        const c = await scheduleCanvasCleanup(job)
+        if (c.mode === 'immediate') {
+          logEvent(job, `画布清理：${c.deleted}/${c.total} 个节点已删除`)
+        } else if (c.mode === 'delayed') {
+          logEvent(job, `画布节点保留至 ${c.at}（${c.retainHours} 小时后清理）`, { mode: 'delayed' })
+        } else if (c.mode === 'disabled') {
+          logEvent(job, '画布节点已保留（CLEANUP_CANVAS_NODES=false，可手动复查）', { mode: 'disabled' })
+        }
         saveJob(job)
       } catch { /* 忽略 */ }
       return job
@@ -160,6 +168,8 @@ async function runPipeline(job, transient = {}) {
  *  params 必须是 JSON 可序列化的持久化字段；图片字节等大对象放 transient，不落盘 */
 export async function runJob({ type, model, params, transient = {} }) {
   const job = createJob({ type, model, params })
+  // 按日期画布归档：任务落进「前缀-创建日」画布（失败降级 LIBTV_PROJECT_ID）
+  job.projectId = await resolveDailyCanvas()
   await generationSlots.acquire()
   try {
     return await runPipeline(job, transient)
@@ -181,8 +191,9 @@ export function resumeJobs() {
     console.error(`[resume] 恢复轮询任务 ${job.id}（taskId=${job.taskId}）`)
     generationSlots.acquire().then(async () => {
       try {
-        const st = await waitForTask(job.taskId, { timeoutMs: config.VIDEO_TIMEOUT_MS })
-        const medias = await fetchAllMedia(st.artifacts)
+        const pid = job.projectId
+        const st = await waitForTask(job.taskId, { timeoutMs: config.VIDEO_TIMEOUT_MS, projectId: pid })
+        const medias = await fetchAllMedia(st.artifacts, pid)
         const first = medias[0]
         job.status = 'succeeded'
         if (config.MIRROR_RESULTS) {
@@ -194,7 +205,7 @@ export function resumeJobs() {
         } else {
           job.result = { url: first.url, width: first.width, height: first.height, node_key: first.nodeKey }
         }
-        try { await cleanupJobNodes(job) } catch { /* 忽略 */ }
+        try { await scheduleCanvasCleanup(job) } catch { /* 忽略 */ }
       } catch (err) {
         job.status = 'failed'
         job.error = { message: err.message.slice(0, 500), code: 'generation_failed' }

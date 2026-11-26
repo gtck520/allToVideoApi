@@ -29,10 +29,10 @@ export async function toolJson(name, args, opts = {}) {
  * attempt > 0 时换新幂等键（旧键关联的任务已终态失败）。
  * @returns {{ taskId: string, accepted: boolean }}
  */
-export async function submitGeneration({ jobId, kind, model, prompt, params, attempt = 0 }) {
+export async function submitGeneration({ jobId, kind, model, prompt, params, attempt = 0, projectId }) {
   const key = idempotencyKey(jobId, 'submit', attempt)
   const args = {
-    project_id: config.PROJECT_ID,
+    project_id: projectId || config.PROJECT_ID,
     idempotency_key: key,
     kind,
     request: { model, prompt, params: params || {} },
@@ -56,7 +56,7 @@ export async function submitGeneration({ jobId, kind, model, prompt, params, att
  * create_node 提交（图像编辑走画布引用边）。
  * run=true 直接发起生成并返回 task_id；left 为引用的源图片节点。
  */
-export async function createNodeRun({ jobId, model, prompt, params, referenceNodeIds, attempt = 0 }) {
+export async function createNodeRun({ jobId, model, prompt, params, referenceNodeIds, attempt = 0, projectId }) {
   const key = idempotencyKey(jobId, 'node', attempt)
   const args = {
     name: `gw-${jobId}`,
@@ -65,7 +65,7 @@ export async function createNodeRun({ jobId, model, prompt, params, referenceNod
     model,
     // 注意：实测服务端拒绝 image 节点带 intent（"Node intent is only used for video nodes"）；
     // 图生图模式由引用边自动推导（"Image generation mode is derived from the final image references"）
-    projectId: config.PROJECT_ID,
+    projectId: projectId || config.PROJECT_ID,
     prompt,
     params: params || {},
     left: referenceNodeIds,
@@ -91,7 +91,7 @@ export async function createNodeRun({ jobId, model, prompt, params, referenceNod
  * generate_video 提交（图生视频：referenceImageNodes）。
  * run=true 服务端会等待到可播放或终态，调用本身可能挂起数分钟——超时后用同一幂等键重试恢复。
  */
-export async function generateVideoRun({ jobId, model, prompt, params, referenceImageNodes = [], attempt = 0 }) {
+export async function generateVideoRun({ jobId, model, prompt, params, referenceImageNodes = [], attempt = 0, projectId }) {
   const key = idempotencyKey(jobId, 'video', attempt)
   const args = {
     name: `gw-${jobId}`,
@@ -99,7 +99,7 @@ export async function generateVideoRun({ jobId, model, prompt, params, reference
     model,
     run: true,
     idempotencyKey: key,
-    projectId: config.PROJECT_ID,
+    projectId: projectId || config.PROJECT_ID,
     params: params || {},
     ...(referenceImageNodes.length ? { referenceImageNodes } : {}),
   }
@@ -116,13 +116,13 @@ export async function generateVideoRun({ jobId, model, prompt, params, reference
 }
 
 /** 轮询任务直到终态或超时 */
-export async function waitForTask(taskId, { timeoutMs, onPoll } = {}) {
+export async function waitForTask(taskId, { timeoutMs, onPoll, projectId } = {}) {
   const deadline = Date.now() + timeoutMs
   let consecutiveErrors = 0
   while (Date.now() < deadline) {
     let st
     try {
-      st = await withRetry(() => toolJson('task_status', { task_id: taskId, project_id: config.PROJECT_ID }), { attempts: 2, base: 800 })
+      st = await withRetry(() => toolJson('task_status', { task_id: taskId, project_id: projectId || config.PROJECT_ID }), { attempts: 2, base: 800 })
       consecutiveErrors = 0
     } catch (err) {
       consecutiveErrors++
@@ -149,15 +149,15 @@ export async function waitForTask(taskId, { timeoutMs, onPoll } = {}) {
 }
 
 /** 从 artifacts 提取 node_key，再用 inspect_media 换取媒体直链 */
-export async function fetchMediaFromArtifacts(artifacts) {
+export async function fetchMediaFromArtifacts(artifacts, projectId) {
   const item = Array.isArray(artifacts) ? artifacts.find((a) => a.node_key) : null
   if (!item) throw new NonRetryableError(`artifacts 中没有 node_key：${JSON.stringify(artifacts).slice(0, 300)}`, { httpStatus: 502 })
-  return fetchMediaUrl(item.node_key)
+  return fetchMediaUrl(item.node_key, projectId)
 }
 
-export async function fetchMediaUrl(nodeKey) {
+export async function fetchMediaUrl(nodeKey, projectId) {
   const info = await withRetry(
-    () => toolJson('inspect_media', { node: nodeKey, projectId: config.PROJECT_ID }),
+    () => toolJson('inspect_media', { node: nodeKey, projectId: projectId || config.PROJECT_ID }),
     { attempts: 3, base: 1000 },
   )
   const urls = info?.media?.urls || info?.evidence?.visual?.sourceUrl && [info.evidence.visual.sourceUrl] || []
@@ -171,10 +171,10 @@ export async function fetchMediaUrl(nodeKey) {
 }
 
 /** 多图产物全部取回（count>1 时 artifacts 有多项） */
-export async function fetchAllMedia(artifacts) {
+export async function fetchAllMedia(artifacts, projectId) {
   const keys = (Array.isArray(artifacts) ? artifacts : []).filter((a) => a?.node_key).map((a) => a.node_key)
   if (!keys.length) throw new NonRetryableError(`artifacts 中没有 node_key：${JSON.stringify(artifacts).slice(0, 300)}`, { httpStatus: 502 })
-  return Promise.all(keys.map((k) => fetchMediaUrl(k)))
+  return Promise.all(keys.map((k) => fetchMediaUrl(k, projectId)))
 }
 
 // ---- 模型发现（/v1/models 用，带缓存） ----
