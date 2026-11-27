@@ -10,6 +10,14 @@
 
 仓库地址：<https://gitee.com/konger520/all-to-video-api.git>
 
+> 💬 **对接或部署遇到问题？** 不用自己折腾——扫码加好友聊聊（备注 **LibTV网关**），接入方式、参数怎么传、New API 怎么配，都可以直接问。
+> 另外如果你在做 **AI 短剧 / 批量视频**，欢迎试试我的在线工具 **[auto.kanglan.vip](https://auto.kanglan.vip)** —— 短剧自动化生产，配合本网关食用更佳 😉
+>
+> | 扫码加好友（备注：LibTV网关） | 关注公众号（陈程序员大康） |
+> | :---: | :---: |
+> | <img src="docs/images/wechat-qrcode.jpg" width="180" /> | <img src="docs/images/official-account.jpg" width="180" /> |
+> | **微信号: kan28256** | **获取最新自动化教程** |
+
 ---
 
 ## 你能用它做什么
