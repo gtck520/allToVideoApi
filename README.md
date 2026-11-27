@@ -10,13 +10,18 @@
 
 仓库地址：<https://gitee.com/konger520/all-to-video-api.git>
 
-> 💬 **对接或部署遇到问题？** 不用自己折腾——扫码加好友聊聊（备注 **LibTV网关**），接入方式、参数怎么传、New API 怎么配，都可以直接问。
-> 另外如果你在做 **AI 短剧 / 批量视频**，欢迎试试我的在线工具 **[auto.kanglan.vip](https://auto.kanglan.vip)** —— 短剧自动化生产，配合本网关食用更佳 😉
+> 💬 **对接或部署遇到问题？** ——扫码加好友聊聊（备注 **LibTV网关**）  
+> 另外如果你在做 **AI 短剧 / 批量视频**，欢迎试试我的短剧工具 **[auto.kanglan.vip](https://auto.kanglan.vip)** —— 复刻解析轻松制作！
 >
-> | 扫码加好友（备注：LibTV网关） | 关注公众号（陈程序员大康） |
-> | :---: | :---: |
+> 短剧工具本身免费，但是生成费用需要自己承担。
+
+|   |   |   |
+| - | - | - |
+
+> |                    扫码加好友（备注：LibTV网关）                    |                        关注公众号（陈程序员大康）                       |
+> | :-----------------------------------------------------: | :--------------------------------------------------------: |
 > | <img src="docs/images/wechat-qrcode.jpg" width="180" /> | <img src="docs/images/official-account.jpg" width="180" /> |
-> | **微信号: kan28256** | **获取最新自动化教程** |
+> |                    **微信号: kan28256**                    |                        **获取最新自动化教程**                       |
 
 ---
 
@@ -128,13 +133,13 @@ curl http://127.0.0.1:8787/healthz
 
 服务默认首页是**模型广场**，顶部导航可在首页、模型广场、API 文档、授权之间切换。以下页面**不需要 API key**：
 
-| 地址 | 用途 |
-|---|---|
-| <http://127.0.0.1:8787/> | 首页：三个入口 + 最短对接路径 |
-| <http://127.0.0.1:8787/models> | 模型广场：查看实时模型与参数契约、筛选、一键复制模型 ID |
-| <http://127.0.0.1:8787/docs> | 浏览器打开的可视化文档：左侧接口导航，右侧说明 / 参数 / cURL·Node.js·Python 示例，支持搜索与明暗主题 |
-| <http://127.0.0.1:8787/docs.md> | Markdown 文本，适合直接发给 Agent |
-| <http://127.0.0.1:8787/openapi.json> | OpenAPI 3.0 JSON，适合自动生成客户端 |
+| 地址                                   | 用途                                                              |
+| ------------------------------------ | --------------------------------------------------------------- |
+| <http://127.0.0.1:8787/>             | 首页：三个入口 + 最短对接路径                                                |
+| <http://127.0.0.1:8787/models>       | 模型广场：查看实时模型与参数契约、筛选、一键复制模型 ID                                   |
+| <http://127.0.0.1:8787/docs>         | 浏览器打开的可视化文档：左侧接口导航，右侧说明 / 参数 / cURL·Node.js·Python 示例，支持搜索与明暗主题 |
+| <http://127.0.0.1:8787/docs.md>      | Markdown 文本，适合直接发给 Agent                                        |
+| <http://127.0.0.1:8787/openapi.json> | OpenAPI 3.0 JSON，适合自动生成客户端                                      |
 
 把 `http://<你的服务地址>/docs.md` 发给 Agent，它就能按文档完成对接。
 
@@ -255,17 +260,17 @@ console.log(result.data[0].url)
 
 ### 6. 接口一览
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/healthz` | 探活（免鉴权） |
-| GET | `/v1/models` | 模型列表；`?detail=full` 附带全部参数契约 |
-| GET | `/v1/models/{id}` | 单个模型的实时参数契约 |
-| POST | `/v1/images/generations` | 文生图，同步返回 |
-| POST | `/v1/images/edits` | 图像编辑，同步返回 |
-| POST | `/v1/videos` | 创建视频任务，异步返回 |
-| GET | `/v1/videos/{id}` | 查询视频任务 |
-| GET | `/v1/videos/{id}/content` | 跳转到视频结果 |
-| GET | `/files/{jobId}[/{n}]` | 读取本地镜像结果（仅在开启镜像时有内容） |
+| 方法   | 路径                        | 说明                           |
+| ---- | ------------------------- | ---------------------------- |
+| GET  | `/healthz`                | 探活（免鉴权）                      |
+| GET  | `/v1/models`              | 模型列表；`?detail=full` 附带全部参数契约 |
+| GET  | `/v1/models/{id}`         | 单个模型的实时参数契约                  |
+| POST | `/v1/images/generations`  | 文生图，同步返回                     |
+| POST | `/v1/images/edits`        | 图像编辑，同步返回                    |
+| POST | `/v1/videos`              | 创建视频任务，异步返回                  |
+| GET  | `/v1/videos/{id}`         | 查询视频任务                       |
+| GET  | `/v1/videos/{id}/content` | 跳转到视频结果                      |
+| GET  | `/files/{jobId}[/{n}]`    | 读取本地镜像结果（仅在开启镜像时有内容）         |
 
 错误统一为 `{"error":{"message","type","code"}}` 格式。
 
@@ -275,12 +280,12 @@ console.log(result.data[0].url)
 
 **渠道配置**：
 
-| 项 | 填什么 |
-|---|---|
-| 渠道类型 | `OpenAI`（OpenAI Compatible） |
+| 项               | 填什么                                                        |
+| --------------- | ---------------------------------------------------------- |
+| 渠道类型            | `OpenAI`（OpenAI Compatible）                                |
 | 代理地址 / Base URL | `http://<服务器IP>:8787` —— **只填到根路径**，不要带 `/v1`，New API 会自己拼 |
-| 密钥 | `/www/all-to-videoApi/.env` 里的 `GATEWAY_API_KEY` |
-| 模型列表 | 拉取后勾选需要的模型；图像模型和视频模型分开勾选，模型名与 `/v1/models` 返回的 id 保持一致 |
+| 密钥              | `/www/all-to-videoApi/.env` 里的 `GATEWAY_API_KEY`           |
+| 模型列表            | 拉取后勾选需要的模型；图像模型和视频模型分开勾选，模型名与 `/v1/models` 返回的 id 保持一致     |
 
 **图像生成**：走 `/v1/images/generations`，标准字段 `model` / `prompt` / `n` / `size` 均可直接用；`n` 映射为 LibTV 的 `count`，`size` 就近映射为画幅。更精细的控制（清晰度、比例、数量枚举）放 `params` 透传。低成本批量生成优先用 `z-image`（默认 1K，可选 2K/4K），不要用 `seedream-4.5`。
 
@@ -342,21 +347,21 @@ ssh -L 8787:127.0.0.1:8787 <用户名>@<服务器>
 
 在 `.env` 中设置（完整示例见 `.env.example`）：
 
-| 变量 | 说明 | 默认 |
-|---|---|---|
-| `GATEWAY_API_KEY` | 对外 Bearer key | 自动生成到 `data/gateway-key.json` |
-| `GATEWAY_PORT` | 监听端口 | `8787` |
-| `LIBTV_PROJECT_ID` | **必填**，画布 uuid（开启按日期归档后作为兜底画布） | 无 |
-| `CANVAS_BY_DATE` | `true` 时每天自动创建「CANVAS_NAME_PREFIX-YYYY-MM-DD」画布，当天生成进当天画布，方便按天归档/整体清理 | `true` |
-| `CANVAS_NAME_PREFIX` | 按日期画布的名称前缀 | `API网关` |
-| `DEFAULT_IMAGE_MODEL` / `DEFAULT_VIDEO_MODEL` | 不传 `model` 时的默认模型 | `lib-image-2.6-a` / `motion-3.1-lite` |
-| `MIRROR_RESULTS` | `true` 时把结果转存到本地并暴露 `/files/...` | `false` |
-| `FILES_RETENTION_HOURS` | 本地镜像保留时长，`0` 为永久 | `168` |
-| `CLEANUP_CANVAS_NODES` | 是否清理画布节点；`false` 则永久保留，方便在 LibTV 复查 | `true` |
-| `CANVAS_NODE_RETENTION_HOURS` | 仅上面为 `true` 时生效：`0`=立即删除，`N`=保留 N 小时后自动删除 | `0` |
-| `LOG_RETENTION_HOURS` | HTTP 访问日志与 MCP 出站日志保留时长，`0` 为永久 | `168` |
-| `MAX_CONCURRENT_GENERATIONS` | 同时进行的生成数上限 | `3` |
-| `AUTH_REFRESH_MAX_FAILURES` | 刷新连续失败多少次后要求重新授权 | `3` |
+| 变量                                            | 说明                                                                    | 默认                                    |
+| --------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------- |
+| `GATEWAY_API_KEY`                             | 对外 Bearer key                                                         | 自动生成到 `data/gateway-key.json`         |
+| `GATEWAY_PORT`                                | 监听端口                                                                  | `8787`                                |
+| `LIBTV_PROJECT_ID`                            | **必填**，画布 uuid（开启按日期归档后作为兜底画布）                                        | 无                                     |
+| `CANVAS_BY_DATE`                              | `true` 时每天自动创建「CANVAS_NAME_PREFIX-YYYY-MM-DD」画布，当天生成进当天画布，方便按天归档/整体清理 | `true`                                |
+| `CANVAS_NAME_PREFIX`                          | 按日期画布的名称前缀                                                            | `API网关`                               |
+| `DEFAULT_IMAGE_MODEL` / `DEFAULT_VIDEO_MODEL` | 不传 `model` 时的默认模型                                                     | `lib-image-2.6-a` / `motion-3.1-lite` |
+| `MIRROR_RESULTS`                              | `true` 时把结果转存到本地并暴露 `/files/...`                                      | `false`                               |
+| `FILES_RETENTION_HOURS`                       | 本地镜像保留时长，`0` 为永久                                                      | `168`                                 |
+| `CLEANUP_CANVAS_NODES`                        | 是否清理画布节点；`false` 则永久保留，方便在 LibTV 复查                                   | `true`                                |
+| `CANVAS_NODE_RETENTION_HOURS`                 | 仅上面为 `true` 时生效：`0`=立即删除，`N`=保留 N 小时后自动删除                             | `0`                                   |
+| `LOG_RETENTION_HOURS`                         | HTTP 访问日志与 MCP 出站日志保留时长，`0` 为永久                                       | `168`                                 |
+| `MAX_CONCURRENT_GENERATIONS`                  | 同时进行的生成数上限                                                            | `3`                                   |
+| `AUTH_REFRESH_MAX_FAILURES`                   | 刷新连续失败多少次后要求重新授权                                                      | `3`                                   |
 
 **结果地址**：默认直接返回 LibTV 的原始公网直链；如需稳定地址或担心直链时效，设 `MIRROR_RESULTS=true`，此时结果会转存到 `data/results/`，接口返回 `http://<你的服务地址>/files/<任务id>`。
 
@@ -365,23 +370,26 @@ ssh -L 8787:127.0.0.1:8787 <用户名>@<服务器>
 **画布节点留存**：默认生成成功后立即删除本次创建的画布节点。若想在 LibTV 里复查生成结果、保留证据，设 `CLEANUP_CANVAS_NODES=false` 可永久保留；若只想暂存一段时间，保持 `CLEANUP_CANVAS_NODES=true` 并设 `CANVAS_NODE_RETENTION_HOURS=24`（示例为保留 24 小时），到期的节点会在服务启动时及每 10 分钟由后台自动清理，重启不会丢失清理计划。
 
 **日志留存**：网关会把两类日志按天写入 `data/logs/`，默认保留 7 天，可用 `LOG_RETENTION_HOURS` 调整（`0` 表示永久）：
+
 - `http-YYYY-MM-DD.log`：收到的 HTTP 请求，含方法、路径、状态码、耗时、来源 IP、请求体字节数、模型、prompt 片段、任务 id、错误信息；
-- `mcp-YYYY-MM-DD.log`：去 LibTV 的 MCP 请求，含工具名、参数摘要、是否成功、耗时、错误信息。
-日志只记元数据，不记录 `Authorization`、Cookie、图片字节等敏感内容。
+
+
+- `mcp-YYYY-MM-DD.log`：去 LibTV 的 MCP 请求，含工具名、参数摘要、是否成功、耗时、错误信息。  
+  日志只记元数据，不记录 `Authorization`、Cookie、图片字节等敏感内容。
 
 ---
 
 ## 九、常见问题
 
-| 现象 | 处理 |
-|---|---|
-| 返回 `401 invalid_api_key` | 检查请求头是否带了正确的 `GATEWAY_API_KEY` |
-| 返回 `AUTH_REQUIRED` | 查看 `/auth/status`：未锁定时访问 `/auth` 重新扫码；已锁定但接口仍报错时执行 `npm run auth:logout` 后重新授权 |
-| 访问 `/auth` 只看到「已授权」 | 这是正常现象：授权成功后授权页会锁定，防止覆盖当前账号 |
-| 提示 `COMMERCIAL_BLOCKED` / 算力不足 | LibTV 账号额度不足，与网关无关，充值或领取活动额度后恢复 |
-| 视频任务返回 `409 not_ready` | 视频是异步的，继续用任务 id 查询，直到 `status=succeeded` |
-| 图像接口返回 `504` | 生成超出等待时间，任务已保留，可用返回的 job id 通过 `/v1/videos/{id}` 继续查 |
-| Docker 里页面授权不显示按钮 | LibTV 只接受 loopback 回调，请在宿主机扫码并挂载 `data` |
+| 现象                             | 处理                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| 返回 `401 invalid_api_key`       | 检查请求头是否带了正确的 `GATEWAY_API_KEY`                                                 |
+| 返回 `AUTH_REQUIRED`             | 查看 `/auth/status`：未锁定时访问 `/auth` 重新扫码；已锁定但接口仍报错时执行 `npm run auth:logout` 后重新授权 |
+| 访问 `/auth` 只看到「已授权」            | 这是正常现象：授权成功后授权页会锁定，防止覆盖当前账号                                                    |
+| 提示 `COMMERCIAL_BLOCKED` / 算力不足 | LibTV 账号额度不足，与网关无关，充值或领取活动额度后恢复                                                |
+| 视频任务返回 `409 not_ready`         | 视频是异步的，继续用任务 id 查询，直到 `status=succeeded`                                       |
+| 图像接口返回 `504`                   | 生成超出等待时间，任务已保留，可用返回的 job id 通过 `/v1/videos/{id}` 继续查                           |
+| Docker 里页面授权不显示按钮              | LibTV 只接受 loopback 回调，请在宿主机扫码并挂载 `data`                                        |
 
 ---
 
